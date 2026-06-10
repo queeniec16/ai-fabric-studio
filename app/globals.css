@@ -369,6 +369,49 @@ button {
   cursor: crosshair;
 }
 
+.crop-stage.polygon-closed {
+  cursor: default;
+}
+
+.crop-stage.mode-unselected::after {
+  position: absolute;
+  inset: 0;
+  content: "";
+  background: rgba(12, 18, 16, 0.34);
+}
+
+.selection-mode-prompt {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 3;
+  width: min(360px, calc(100% - 40px));
+  padding: 18px 20px;
+  color: var(--ink);
+  background: rgba(251, 250, 247, 0.94);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.2);
+  text-align: center;
+  transform: translate(-50%, -50%);
+}
+
+.selection-mode-prompt strong,
+.selection-mode-prompt span {
+  display: block;
+}
+
+.selection-mode-prompt strong {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 20px;
+  font-weight: 400;
+}
+
+.selection-mode-prompt span {
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.5;
+}
+
 .crop-shade {
   position: absolute;
   z-index: 1;
@@ -471,6 +514,42 @@ button {
   bottom: -9px;
 }
 
+.crop-handle.n,
+.crop-handle.s {
+  left: 50%;
+  width: 28px;
+  height: 12px;
+  border-radius: 8px;
+  cursor: ns-resize;
+  transform: translateX(-50%);
+}
+
+.crop-handle.n {
+  top: -6px;
+}
+
+.crop-handle.s {
+  bottom: -6px;
+}
+
+.crop-handle.e,
+.crop-handle.w {
+  top: 50%;
+  width: 12px;
+  height: 28px;
+  border-radius: 8px;
+  cursor: ew-resize;
+  transform: translateY(-50%);
+}
+
+.crop-handle.e {
+  right: -6px;
+}
+
+.crop-handle.w {
+  left: -6px;
+}
+
 .crop-move-label {
   position: absolute;
   top: 50%;
@@ -565,6 +644,21 @@ button {
   pointer-events: none;
 }
 
+.polygon-status {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 3;
+  padding: 7px 9px;
+  color: white;
+  background: rgba(23, 63, 53, 0.88);
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  pointer-events: none;
+}
+
 .crop-controls {
   padding: 18px;
   border: 1px solid var(--line);
@@ -577,27 +671,43 @@ button {
 
 .selection-mode-control {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  border: 1px solid #c9c8c1;
+  gap: 8px;
 }
 
 .selection-mode-control button {
-  height: 32px;
-  border: 0;
-  border-right: 1px solid #c9c8c1;
+  min-height: 62px;
+  padding: 10px 11px;
+  border: 1px solid #c9c8c1;
   cursor: pointer;
   background: transparent;
-  font-size: 8px;
-  font-weight: 750;
+  text-align: left;
 }
 
-.selection-mode-control button:last-child {
-  border-right: 0;
+.selection-mode-control button strong,
+.selection-mode-control button span {
+  display: block;
+}
+
+.selection-mode-control button strong {
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.selection-mode-control button span {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 7px;
+  line-height: 1.4;
 }
 
 .selection-mode-control button.selected {
   color: white;
   background: var(--green);
+  border-color: var(--green);
+}
+
+.selection-mode-control button.selected span {
+  color: rgba(255, 255, 255, 0.76);
 }
 
 .crop-control-label {
@@ -634,12 +744,12 @@ button {
 
 .polygon-actions {
   display: grid;
-  grid-template-columns: 1fr auto auto;
-  align-items: center;
+  grid-template-columns: 1fr 1fr;
   gap: 6px;
 }
 
 .polygon-actions span {
+  grid-column: 1 / -1;
   color: var(--muted);
   font-size: 8px;
 }
@@ -657,6 +767,42 @@ button {
 }
 
 .polygon-actions button:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+.polygon-actions .close-polygon-button:not(:disabled) {
+  color: white;
+  background: var(--green);
+  border-color: var(--green);
+}
+
+.reset-selection-button {
+  width: 100%;
+  min-height: 32px;
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid var(--line);
+  cursor: pointer;
+  color: var(--green);
+  background: #f7f7f3;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+
+.reset-selection-button svg {
+  width: 13px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+}
+
+.reset-selection-button:disabled {
   cursor: default;
   opacity: 0.4;
 }
@@ -712,7 +858,7 @@ button {
 }
 
 .confirm-crop-button:disabled {
-  cursor: wait;
+  cursor: default;
   opacity: 0.65;
 }
 

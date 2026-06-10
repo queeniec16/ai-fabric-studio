@@ -4,6 +4,8 @@ import {
   ChangeEvent,
   DragEvent,
   PointerEvent as ReactPointerEvent,
+  useCallback,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -65,13 +67,14 @@ function CropIcon({ className }: IconProps) {
 }
 
 type CropInteraction = {
-  mode: "move" | "nw" | "ne" | "sw" | "se";
+  mode: "move" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w" | "nw";
   pointerX: number;
   pointerY: number;
   crop: CropRect;
 };
 
-type SelectionMode = "rectangle" | "polygon";
+type SelectionTool = "rectangle" | "polygon";
+type SelectionMode = SelectionTool | null;
 
 type PointInteraction = {
   index: number;
@@ -93,6 +96,8 @@ function CropEditor({
   onChange,
   polygonPoints,
   onPolygonPointsChange,
+  polygonClosed,
+  onPolygonClosedChange,
   onConfirm,
   onReplace,
   isLoading,
@@ -106,6 +111,8 @@ function CropEditor({
   onChange: (crop: CropRect) => void;
   polygonPoints: SelectionPoint[];
   onPolygonPointsChange: (points: SelectionPoint[]) => void;
+  polygonClosed: boolean;
+  onPolygonClosedChange: (closed: boolean) => void;
   onConfirm: () => void;
   onReplace: () => void;
   isLoading: boolean;
@@ -113,6 +120,42 @@ function CropEditor({
   const stageRef = useRef<HTMLDivElement>(null);
   const interactionRef = useRef<CropInteraction | null>(null);
   const pointInteractionRef = useRef<PointInteraction | null>(null);
+
+  const undoPolygonPoint = useCallback(() => {
+    if (!polygonPoints.length) return;
+    onPolygonClosedChange(false);
+    onPolygonPointsChange(polygonPoints.slice(0, -1));
+  }, [onPolygonClosedChange, onPolygonPointsChange, polygonPoints]);
+
+  function resetSelection() {
+    interactionRef.current = null;
+    pointInteractionRef.current = null;
+
+    if (selectionMode === "rectangle") {
+      onChange({ x: 0.08, y: 0.08, width: 0.84, height: 0.84 });
+      return;
+    }
+
+    if (selectionMode === "polygon") {
+      onPolygonClosedChange(false);
+      onPolygonPointsChange([]);
+    }
+  }
+
+  useEffect(() => {
+    if (selectionMode !== "polygon") return;
+
+    function handleUndoKey(event: KeyboardEvent) {
+      if (event.key !== "Backspace" && event.key !== "Enter") return;
+      const target = event.target as HTMLElement | null;
+      if (target?.matches("input, textarea, select, [contenteditable='true']")) return;
+      event.preventDefault();
+      undoPolygonPoint();
+    }
+
+    window.addEventListener("keydown", handleUndoKey);
+    return () => window.removeEventListener("keydown", handleUndoKey);
+  }, [selectionMode, undoPolygonPoint]);
 
   function startInteraction(
     event: ReactPointerEvent<HTMLDivElement | HTMLButtonElement>,
@@ -217,7 +260,7 @@ function CropEditor({
   }
 
   function addPolygonPoint(event: ReactPointerEvent<HTMLDivElement>) {
-    if (selectionMode !== "polygon" || pointInteractionRef.current) return;
+    if (selectionMode !== "polygon" || polygonClosed || pointInteractionRef.current) return;
     if (event.target !== event.currentTarget && (event.target as HTMLElement).tagName !== "IMG") return;
     const point = getNormalizedPoint(event.clientX, event.clientY);
     if (point) onPolygonPointsChange([...polygonPoints, point]);
@@ -261,7 +304,14 @@ function CropEditor({
       }
     : { width: 0, height: 0 };
   const polygonPath = polygonPoints.map((point) => `${point.x * 100},${point.y * 100}`).join(" ");
-  const canConfirm = selectionMode === "rectangle" || polygonPoints.length >= 3;
+  const canClosePolygon = polygonPoints.length >= 3 && !polygonClosed;
+  const canConfirm = selectionMode === "rectangle" || (selectionMode === "polygon" && polygonClosed);
+
+  function chooseSelectionMode(mode: SelectionTool) {
+    interactionRef.current = null;
+    pointInteractionRef.current = null;
+    onSelectionModeChange(mode);
+  }
 
   return (
     <div className="crop-workspace">
@@ -280,13 +330,24 @@ function CropEditor({
       <div className="crop-layout">
         <div
           ref={stageRef}
-          className={`crop-stage ${selectionMode === "polygon" ? "polygon-mode" : ""}`}
+          className={`crop-stage ${
+            selectionMode === "polygon"
+              ? `polygon-mode ${polygonClosed ? "polygon-closed" : ""}`
+              : selectionMode === "rectangle"
+                ? "rectangle-mode"
+                : "mode-unselected"
+          }`}
           style={{ aspectRatio: `${imageWidth} / ${imageHeight}` }}
           onPointerDown={addPolygonPoint}
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={imageUrl} alt="Uploaded fabric photo ready for cropping" draggable={false} />
-          {selectionMode === "rectangle" ? (
+          {selectionMode === null ? (
+            <div className="selection-mode-prompt">
+              <strong>Choose a fabric area tool</strong>
+              <span>Select Rectangle Crop or Freeform / Polygon Selection to begin.</span>
+            </div>
+          ) : selectionMode === "rectangle" ? (
             <>
               <div className="crop-shade crop-shade-top" style={{ height: `${crop.y * 100}%` }} />
               <div
@@ -327,12 +388,12 @@ function CropEditor({
                 <span className="crop-grid vertical second" />
                 <span className="crop-grid horizontal first" />
                 <span className="crop-grid horizontal second" />
-                {(["nw", "ne", "sw", "se"] as const).map((corner) => (
+                {(["n", "ne", "e", "se", "s", "sw", "w", "nw"] as const).map((handle) => (
                   <button
-                    key={corner}
-                    className={`crop-handle ${corner}`}
-                    aria-label={`Resize crop ${corner}`}
-                    onPointerDown={(event) => startInteraction(event, corner)}
+                    key={handle}
+                    className={`crop-handle ${handle}`}
+                    aria-label={`Resize crop ${handle}`}
+                    onPointerDown={(event) => startInteraction(event, handle)}
                     onPointerMove={updateInteraction}
                     onPointerUp={stopInteraction}
                     onPointerCancel={stopInteraction}
@@ -344,17 +405,21 @@ function CropEditor({
           ) : (
             <>
               <svg className="polygon-overlay" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-                <defs>
-                  <mask id="fabric-polygon-mask">
-                    <rect width="100" height="100" fill="white" />
-                    {polygonPoints.length >= 3 && <polygon points={polygonPath} fill="black" />}
-                  </mask>
-                </defs>
-                <rect width="100" height="100" className="polygon-shade" mask="url(#fabric-polygon-mask)" />
+                {polygonClosed && (
+                  <>
+                    <defs>
+                      <mask id="fabric-polygon-mask">
+                        <rect width="100" height="100" fill="white" />
+                        <polygon points={polygonPath} fill="black" />
+                      </mask>
+                    </defs>
+                    <rect width="100" height="100" className="polygon-shade" mask="url(#fabric-polygon-mask)" />
+                  </>
+                )}
                 {polygonPoints.length >= 2 && (
                   <polyline points={polygonPath} className="polygon-line" />
                 )}
-                {polygonPoints.length >= 3 && (
+                {polygonClosed && (
                   <line
                     x1={polygonPoints[polygonPoints.length - 1].x * 100}
                     y1={polygonPoints[polygonPoints.length - 1].y * 100}
@@ -381,30 +446,35 @@ function CropEditor({
               {polygonPoints.length === 0 && (
                 <span className="polygon-empty-message">Click around the fabric boundary to add points</span>
               )}
+              {polygonClosed && (
+                <span className="polygon-status">Polygon closed · drag points to refine</span>
+              )}
             </>
           )}
         </div>
 
         <aside className="crop-controls">
           <div>
-            <p className="crop-control-label">Selection method</p>
+            <p className="crop-control-label">Choose selection mode</p>
             <div className="selection-mode-control">
               <button
                 className={selectionMode === "rectangle" ? "selected" : ""}
-                onClick={() => onSelectionModeChange("rectangle")}
+                onClick={() => chooseSelectionMode("rectangle")}
               >
-                Rectangle
+                <strong>Rectangle Crop</strong>
+                <span>Move and resize one crop box</span>
               </button>
               <button
                 className={selectionMode === "polygon" ? "selected" : ""}
-                onClick={() => onSelectionModeChange("polygon")}
+                onClick={() => chooseSelectionMode("polygon")}
               >
-                Polygon
+                <strong>Freeform / Polygon</strong>
+                <span>Place points around the fabric edge</span>
               </button>
             </div>
           </div>
 
-          <div>
+          {selectionMode && <div>
             <p className="crop-control-label">
               {selectionMode === "rectangle" ? "Selection size" : "Boundary points"}
             </p>
@@ -423,41 +493,62 @@ function CropEditor({
               </div>
             ) : (
               <div className="polygon-actions">
-                <span>{polygonPoints.length} points</span>
+                <span>
+                  {polygonPoints.length} points
+                  {polygonClosed ? " · closed" : ""}
+                </span>
                 <button
-                  onClick={() => onPolygonPointsChange(polygonPoints.slice(0, -1))}
+                  onClick={undoPolygonPoint}
                   disabled={!polygonPoints.length}
                 >
-                  Undo Last
+                  Undo Point
                 </button>
                 <button
-                  onClick={() => onPolygonPointsChange([])}
-                  disabled={!polygonPoints.length}
+                  className="close-polygon-button"
+                  onClick={() => onPolygonClosedChange(true)}
+                  disabled={!canClosePolygon}
                 >
-                  Clear
+                  Close Polygon
                 </button>
               </div>
             )}
-          </div>
+          </div>}
+
+          <button
+            className="reset-selection-button"
+            onClick={resetSelection}
+            disabled={!selectionMode}
+          >
+            <ResetIcon />
+            Reset Selection
+          </button>
 
           <div className="crop-guidance">
             <span className="weave-icon" />
             <p>
-              <strong>Choose textile only</strong>
+              <strong>{selectionMode ? "Choose textile only" : "Select a tool to begin"}</strong>
               {selectionMode === "rectangle"
                 ? "Keep the crop inside the physical fabric whenever possible."
-                : "Add points around the real fabric edge, then drag any point to refine it."}
+                : selectionMode === "polygon"
+                  ? polygonClosed
+                    ? "The boundary is closed. Drag any point to refine it, or undo to reopen it."
+                    : "Click around the real fabric edge. Enter or Backspace removes the latest point."
+                  : "Rectangle Crop and Polygon Selection are separate tools."}
             </p>
           </div>
 
           <div className="crop-dimensions">
             <span>Analysis area</span>
             <strong>
-              {selectionMode === "rectangle"
+              {selectionMode === null
+                ? "Choose a mode"
+                : selectionMode === "rectangle"
                 ? `${Math.round(imageWidth * crop.width)} × ${Math.round(imageHeight * crop.height)} px`
-                : polygonPoints.length >= 3
+                : polygonClosed
                   ? `${Math.round(polygonBounds.width)} × ${Math.round(polygonBounds.height)} px`
-                  : "Add 3+ points"}
+                  : polygonPoints.length >= 3
+                    ? "Close polygon"
+                    : "Add 3+ points"}
             </strong>
           </div>
 
@@ -570,9 +661,10 @@ export default function Home() {
   const [fileName, setFileName] = useState("");
   const [uploadedUrl, setUploadedUrl] = useState("");
   const [uploadedImage, setUploadedImage] = useState<ImageData | null>(null);
-  const [selectionMode, setSelectionMode] = useState<SelectionMode>("rectangle");
+  const [selectionMode, setSelectionMode] = useState<SelectionMode>(null);
   const [crop, setCrop] = useState<CropRect>({ x: 0.08, y: 0.08, width: 0.84, height: 0.84 });
   const [polygonPoints, setPolygonPoints] = useState<SelectionPoint[]>([]);
+  const [polygonClosed, setPolygonClosed] = useState(false);
   const [originalUrl, setOriginalUrl] = useState("");
   const [segmentation, setSegmentation] = useState<SegmentationResult | null>(null);
   const [resultUrl, setResultUrl] = useState("");
@@ -598,9 +690,10 @@ export default function Home() {
     setError("");
     setUploadedUrl("");
     setUploadedImage(null);
-    setSelectionMode("rectangle");
+    setSelectionMode(null);
     setCrop({ x: 0.08, y: 0.08, width: 0.84, height: 0.84 });
     setPolygonPoints([]);
+    setPolygonClosed(false);
     setSegmentation(null);
     setResultUrl("");
     setFileName(file.name);
@@ -617,7 +710,11 @@ export default function Home() {
   }
 
   function confirmCrop() {
-    if (!uploadedImage) return;
+    if (
+      !uploadedImage ||
+      !selectionMode ||
+      (selectionMode === "polygon" && (!polygonClosed || polygonPoints.length < 3))
+    ) return;
     setIsLoading(true);
     setError("");
 
@@ -799,6 +896,8 @@ export default function Home() {
             onChange={setCrop}
             polygonPoints={polygonPoints}
             onPolygonPointsChange={setPolygonPoints}
+            polygonClosed={polygonClosed}
+            onPolygonClosedChange={setPolygonClosed}
             onConfirm={confirmCrop}
             onReplace={() => fileInputRef.current?.click()}
             isLoading={isLoading}
