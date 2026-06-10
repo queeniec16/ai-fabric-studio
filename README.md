@@ -21,6 +21,8 @@ AI Fabric Studio 的目标不是成为 Photoshop 或通用图片换色工具，�
 
 - 上传 PNG、JPG 或 WebP 面料图片
 - 提供内置 textile sample，方便快速体验
+- 上传后使用可拖动、可缩放的 crop box 选择真实面料区域
+- 在 Detect Fabric Layers 前排除标签、桌面、手、阴影和其他背景物体
 - 自动识别 2–4 个主要颜色区域
 - 为每个颜色结构生成 pixel mask
 - 显示每个区域的覆盖比例和 mask preview
@@ -34,6 +36,10 @@ AI Fabric Studio 的目标不是成为 Photoshop 或通用图片换色工具，�
 
 ```text
 Upload Fabric
+      ↓
+Crop Fabric Area
+      ↓
+Confirm Crop
       ↓
 Preview Original Fabric
       ↓
@@ -85,6 +91,7 @@ npm start
 - **Frontend:** Next.js 16, React 19, TypeScript
 - **Interface:** custom responsive CSS
 - **Image processing:** browser Canvas and ImageData APIs
+- **Crop interaction:** normalized crop coordinates with drag, resize, and selection zoom
 - **Segmentation:** K-means dominant color clustering
 - **Mask format:** per-pixel `Uint8Array`
 - **Export:** client-side PNG data URL
@@ -96,12 +103,14 @@ No login, payment, database, cloud storage, model training, PBR, U3M, CLO, or Br
 ```text
 app/page.tsx
   ├── Upload and textile workflow UI
+  ├── Fabric area crop editor
   ├── Layer controls
   ├── Recolor preview
   └── PNG export
 
 lib/fabric-segmentation.ts
   ├── Image loading and resizing
+  ├── Confirmed crop extraction
   ├── K-means color clustering
   ├── Pixel mask generation
   ├── Fabric layer classification
@@ -149,6 +158,7 @@ The intended professional vocabulary and interaction model should remain centere
 - The current Stripe / Jacquard label is inferred heuristically from spatial distribution.
 - Mask boundaries do not yet include smoothing or manual correction tools.
 - Images are resized to a maximum processing edge of 1100 pixels.
+- Crop is rectangular and does not yet support perspective correction or freeform outlines.
 - Export uses the analyzed resolution rather than the original full resolution.
 - The algorithm cannot yet distinguish yarn systems, weave structures, embroidery, or print techniques.
 
@@ -160,14 +170,16 @@ For a meaningful review:
 
 1. Run the project and open the homepage.
 2. Use **Try sample fabric** to understand the intended workflow.
-3. Inspect all detected mask previews.
-4. Change Base Color and Pattern Color to clearly different colors.
-5. Click **Apply Color** and compare the result with the source.
-6. Change the number of detected structures between 2, 3, and 4.
-7. Upload real examples such as floral print, stripe, jacquard, check, or textured solid fabric.
-8. Evaluate whether the product language and workflow feel native to textile design.
-9. Separate UX problems from segmentation-algorithm limitations.
-10. Prioritize improvements that strengthen Fabric Layer Recolor rather than adding generic editor features.
+3. Move and resize **Crop Fabric Area**, then confirm the crop.
+4. Verify that only the cropped textile region appears in the layer workspace.
+5. Inspect all detected mask previews.
+6. Change Base Color and Pattern Color to clearly different colors.
+7. Click **Apply Color** and compare the result with the source.
+8. Change the number of detected structures between 2, 3, and 4.
+9. Upload real examples that include labels, table background, or shadows outside the fabric.
+10. Evaluate whether non-fabric objects are successfully excluded before segmentation.
+11. Separate UX problems from segmentation-algorithm limitations.
+12. Prioritize improvements that strengthen Fabric Layer Recolor rather than adding generic editor features.
 
 ## Review Questions
 
@@ -197,11 +209,13 @@ For a meaningful review:
 
 请实际体验以下流程：
 1. Upload Fabric
-2. Detect Fabric Layers
-3. 检查每个 mask
-4. 修改 Base Color 和 Pattern Color
-5. Apply Color
-6. Download PNG
+2. Crop Fabric Area
+3. Confirm Crop
+4. Detect Fabric Layers
+5. 检查每个 mask
+6. 修改 Base Color 和 Pattern Color
+7. Apply Color
+8. Download PNG
 
 请从以下角度进行评估：
 - 它是否符合我长期想建立的 textile / fashion AI 产品方向
@@ -244,4 +258,3 @@ These directions should be evaluated against the central product principle:
 
 This repository is an exploratory MVP intended for local testing, design critique, and
 validation of the Fabric Layer Recolor concept.
-

@@ -1,7 +1,16 @@
 "use client";
 
-import { ChangeEvent, DragEvent, useMemo, useRef, useState } from "react";
 import {
+  ChangeEvent,
+  DragEvent,
+  PointerEvent as ReactPointerEvent,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import {
+  cropFabricImage,
+  CropRect,
   detectFabricLayers,
   FabricLayer,
   imageDataToUrl,
@@ -42,6 +51,261 @@ function ResetIcon({ className }: IconProps) {
     <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden="true">
       <path d="M4 12a8 8 0 1 0 2.3-5.7L4 8.6M4 4v4.6h4.6" />
     </svg>
+  );
+}
+
+function CropIcon({ className }: IconProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M7 3v14a2 2 0 0 0 2 2h12M3 7h14a2 2 0 0 1 2 2v12" />
+    </svg>
+  );
+}
+
+type CropInteraction = {
+  mode: "move" | "nw" | "ne" | "sw" | "se";
+  pointerX: number;
+  pointerY: number;
+  crop: CropRect;
+};
+
+const MIN_CROP_SIZE = 0.12;
+
+function clamp(value: number, minimum: number, maximum: number) {
+  return Math.max(minimum, Math.min(maximum, value));
+}
+
+function CropEditor({
+  imageUrl,
+  imageWidth,
+  imageHeight,
+  crop,
+  onChange,
+  onConfirm,
+  onReplace,
+  isLoading,
+}: {
+  imageUrl: string;
+  imageWidth: number;
+  imageHeight: number;
+  crop: CropRect;
+  onChange: (crop: CropRect) => void;
+  onConfirm: () => void;
+  onReplace: () => void;
+  isLoading: boolean;
+}) {
+  const stageRef = useRef<HTMLDivElement>(null);
+  const interactionRef = useRef<CropInteraction | null>(null);
+
+  function startInteraction(
+    event: ReactPointerEvent<HTMLDivElement | HTMLButtonElement>,
+    mode: CropInteraction["mode"],
+  ) {
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    interactionRef.current = {
+      mode,
+      pointerX: event.clientX,
+      pointerY: event.clientY,
+      crop: { ...crop },
+    };
+  }
+
+  function updateInteraction(event: ReactPointerEvent<HTMLDivElement | HTMLButtonElement>) {
+    const interaction = interactionRef.current;
+    const stage = stageRef.current;
+    if (!interaction || !stage) return;
+
+    const bounds = stage.getBoundingClientRect();
+    const deltaX = (event.clientX - interaction.pointerX) / bounds.width;
+    const deltaY = (event.clientY - interaction.pointerY) / bounds.height;
+    const start = interaction.crop;
+
+    if (interaction.mode === "move") {
+      onChange({
+        ...start,
+        x: clamp(start.x + deltaX, 0, 1 - start.width),
+        y: clamp(start.y + deltaY, 0, 1 - start.height),
+      });
+      return;
+    }
+
+    let left = start.x;
+    let top = start.y;
+    let right = start.x + start.width;
+    let bottom = start.y + start.height;
+
+    if (interaction.mode.includes("w")) {
+      left = clamp(start.x + deltaX, 0, right - MIN_CROP_SIZE);
+    }
+    if (interaction.mode.includes("e")) {
+      right = clamp(right + deltaX, left + MIN_CROP_SIZE, 1);
+    }
+    if (interaction.mode.includes("n")) {
+      top = clamp(start.y + deltaY, 0, bottom - MIN_CROP_SIZE);
+    }
+    if (interaction.mode.includes("s")) {
+      bottom = clamp(bottom + deltaY, top + MIN_CROP_SIZE, 1);
+    }
+
+    onChange({
+      x: left,
+      y: top,
+      width: right - left,
+      height: bottom - top,
+    });
+  }
+
+  function stopInteraction(event: ReactPointerEvent<HTMLDivElement | HTMLButtonElement>) {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    interactionRef.current = null;
+  }
+
+  function updateZoom(value: number) {
+    const size = clamp(value / 100, MIN_CROP_SIZE, 1);
+    const aspect = crop.width / crop.height;
+    let width = size;
+    let height = size;
+
+    if (aspect > 1) {
+      height = size / aspect;
+    } else {
+      width = size * aspect;
+    }
+
+    width = clamp(width, MIN_CROP_SIZE, 1);
+    height = clamp(height, MIN_CROP_SIZE, 1);
+    const centerX = crop.x + crop.width / 2;
+    const centerY = crop.y + crop.height / 2;
+
+    onChange({
+      x: clamp(centerX - width / 2, 0, 1 - width),
+      y: clamp(centerY - height / 2, 0, 1 - height),
+      width,
+      height,
+    });
+  }
+
+  const zoomValue = Math.round(Math.max(crop.width, crop.height) * 100);
+
+  return (
+    <div className="crop-workspace">
+      <div className="crop-intro">
+        <div>
+          <p className="section-kicker">FABRIC AREA SELECTION</p>
+          <h3>Crop Fabric Area</h3>
+          <p>
+            Exclude labels, hands, table surfaces, and shadows. Only the selected textile area
+            will be analyzed for fabric layers.
+          </p>
+        </div>
+        <button className="text-button" onClick={onReplace}>Replace image</button>
+      </div>
+
+      <div className="crop-layout">
+        <div
+          ref={stageRef}
+          className="crop-stage"
+          style={{ aspectRatio: `${imageWidth} / ${imageHeight}` }}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={imageUrl} alt="Uploaded fabric photo ready for cropping" draggable={false} />
+          <div className="crop-shade crop-shade-top" style={{ height: `${crop.y * 100}%` }} />
+          <div
+            className="crop-shade crop-shade-left"
+            style={{
+              top: `${crop.y * 100}%`,
+              width: `${crop.x * 100}%`,
+              height: `${crop.height * 100}%`,
+            }}
+          />
+          <div
+            className="crop-shade crop-shade-right"
+            style={{
+              top: `${crop.y * 100}%`,
+              left: `${(crop.x + crop.width) * 100}%`,
+              right: 0,
+              height: `${crop.height * 100}%`,
+            }}
+          />
+          <div
+            className="crop-shade crop-shade-bottom"
+            style={{ top: `${(crop.y + crop.height) * 100}%` }}
+          />
+          <div
+            className="crop-box"
+            style={{
+              left: `${crop.x * 100}%`,
+              top: `${crop.y * 100}%`,
+              width: `${crop.width * 100}%`,
+              height: `${crop.height * 100}%`,
+            }}
+            onPointerDown={(event) => startInteraction(event, "move")}
+            onPointerMove={updateInteraction}
+            onPointerUp={stopInteraction}
+            onPointerCancel={stopInteraction}
+          >
+            <span className="crop-grid vertical first" />
+            <span className="crop-grid vertical second" />
+            <span className="crop-grid horizontal first" />
+            <span className="crop-grid horizontal second" />
+            {(["nw", "ne", "sw", "se"] as const).map((corner) => (
+              <button
+                key={corner}
+                className={`crop-handle ${corner}`}
+                aria-label={`Resize crop ${corner}`}
+                onPointerDown={(event) => startInteraction(event, corner)}
+                onPointerMove={updateInteraction}
+                onPointerUp={stopInteraction}
+                onPointerCancel={stopInteraction}
+              />
+            ))}
+            <span className="crop-move-label">Drag to position fabric area</span>
+          </div>
+        </div>
+
+        <aside className="crop-controls">
+          <div>
+            <p className="crop-control-label">Selection size</p>
+            <div className="crop-zoom-row">
+              <span>Zoom</span>
+              <input
+                type="range"
+                min="12"
+                max="100"
+                value={zoomValue}
+                onChange={(event) => updateZoom(Number(event.target.value))}
+                aria-label="Crop zoom"
+              />
+              <strong>{zoomValue}%</strong>
+            </div>
+          </div>
+
+          <div className="crop-guidance">
+            <span className="weave-icon" />
+            <p>
+              <strong>Choose textile only</strong>
+              Keep the crop inside the physical fabric whenever possible.
+            </p>
+          </div>
+
+          <div className="crop-dimensions">
+            <span>Analysis area</span>
+            <strong>
+              {Math.round(imageWidth * crop.width)} × {Math.round(imageHeight * crop.height)} px
+            </strong>
+          </div>
+
+          <button className="confirm-crop-button" onClick={onConfirm} disabled={isLoading}>
+            <CropIcon />
+            {isLoading ? "Preparing Fabric..." : "Confirm Crop"}
+          </button>
+        </aside>
+      </div>
+    </div>
   );
 }
 
@@ -138,6 +402,9 @@ async function createSampleFabric() {
 export default function Home() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [fileName, setFileName] = useState("");
+  const [uploadedUrl, setUploadedUrl] = useState("");
+  const [uploadedImage, setUploadedImage] = useState<ImageData | null>(null);
+  const [crop, setCrop] = useState<CropRect>({ x: 0.08, y: 0.08, width: 0.84, height: 0.84 });
   const [originalUrl, setOriginalUrl] = useState("");
   const [segmentation, setSegmentation] = useState<SegmentationResult | null>(null);
   const [resultUrl, setResultUrl] = useState("");
@@ -161,24 +428,53 @@ export default function Home() {
 
     setIsLoading(true);
     setError("");
+    setUploadedUrl("");
+    setUploadedImage(null);
+    setCrop({ x: 0.08, y: 0.08, width: 0.84, height: 0.84 });
     setSegmentation(null);
     setResultUrl("");
     setFileName(file.name);
 
     try {
       const loaded = await loadFabricImage(file);
-      setOriginalUrl(loaded.previewUrl);
-      const detected = detectFabricLayers(loaded.imageData, layerCount);
-      const colors = detected.layers.map((layer) => layer.sourceColor);
-      setSegmentation(detected);
-      setTargetColors(colors);
-      setResultUrl(imageDataToUrl(loaded.imageData));
-      setActiveLayer(0);
+      setUploadedUrl(loaded.previewUrl);
+      setUploadedImage(loaded.imageData);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not analyze this fabric image.");
     } finally {
       setIsLoading(false);
     }
+  }
+
+  function confirmCrop() {
+    if (!uploadedImage) return;
+    setIsLoading(true);
+    setError("");
+
+    window.setTimeout(() => {
+      try {
+        const cropped = cropFabricImage(uploadedImage, crop);
+        const detected = detectFabricLayers(cropped, layerCount);
+        const colors = detected.layers.map((layer) => layer.sourceColor);
+        const croppedUrl = imageDataToUrl(cropped);
+        setOriginalUrl(croppedUrl);
+        setSegmentation(detected);
+        setTargetColors(colors);
+        setResultUrl(croppedUrl);
+        setActiveLayer(0);
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : "Could not crop this fabric image.");
+      } finally {
+        setIsLoading(false);
+      }
+    }, 60);
+  }
+
+  function editCrop() {
+    setSegmentation(null);
+    setOriginalUrl("");
+    setResultUrl("");
+    setTargetColors([]);
   }
 
   function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
@@ -247,6 +543,7 @@ export default function Home() {
     link.click();
   }
 
+  const isCropping = Boolean(uploadedUrl && uploadedImage && !segmentation);
   const hasFabric = Boolean(originalUrl && segmentation);
 
   return (
@@ -276,11 +573,13 @@ export default function Home() {
         <div className="workflow-line">
           <span className="current">01 Upload</span>
           <i />
-          <span className={hasFabric ? "current" : ""}>02 Detect Layers</span>
+          <span className={isCropping || hasFabric ? "current" : ""}>02 Crop Area</span>
           <i />
-          <span className={resultUrl ? "current" : ""}>03 Recolor</span>
+          <span className={hasFabric ? "current" : ""}>03 Detect Layers</span>
           <i />
-          <span>04 Export</span>
+          <span className={resultUrl ? "current" : ""}>04 Recolor</span>
+          <i />
+          <span>05 Export</span>
         </div>
       </section>
 
@@ -293,7 +592,7 @@ export default function Home() {
           {fileName && <p className="file-name">{fileName}</p>}
         </div>
 
-        {!segmentation || !originalUrl ? (
+        {!uploadedImage || !uploadedUrl ? (
           <div
             className={`upload-zone ${isDragging ? "dragging" : ""}`}
             onDragEnter={(event) => {
@@ -316,13 +615,24 @@ export default function Home() {
             </button>
             <span className="upload-meta">PNG, JPG or WebP · up to 15 MB</span>
           </div>
-        ) : (
+        ) : isCropping ? (
+          <CropEditor
+            imageUrl={uploadedUrl}
+            imageWidth={uploadedImage.width}
+            imageHeight={uploadedImage.height}
+            crop={crop}
+            onChange={setCrop}
+            onConfirm={confirmCrop}
+            onReplace={() => fileInputRef.current?.click()}
+            isLoading={isLoading}
+          />
+        ) : segmentation && originalUrl ? (
           <div className="workspace-grid">
             <div className="visual-column">
               <div className="panel-label">
                 <span>Original Fabric</span>
-                <button className="text-button" onClick={() => fileInputRef.current?.click()}>
-                  Replace image
+                <button className="text-button" onClick={editCrop}>
+                  Edit crop
                 </button>
               </div>
               <div className="fabric-frame">
@@ -430,7 +740,7 @@ export default function Home() {
               <p className="export-note">Exports at analyzed resolution · transparent-safe PNG</p>
             </div>
           </div>
-        )}
+        ) : null}
 
         {error && <p className="error-message">{error}</p>}
         <input

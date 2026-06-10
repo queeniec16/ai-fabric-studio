@@ -23,6 +23,13 @@ export type SegmentationResult = {
   layers: FabricLayer[];
 };
 
+export type CropRect = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
 const MAX_PROCESSING_EDGE = 1100;
 const SAMPLE_LIMIT = 9000;
 const ITERATIONS = 14;
@@ -195,6 +202,27 @@ export async function loadFabricImage(file: File) {
     previewUrl: canvas.toDataURL("image/png"),
     imageData: context.getImageData(0, 0, width, height),
   };
+}
+
+export function cropFabricImage(imageData: ImageData, crop: CropRect) {
+  const sourceX = Math.max(0, Math.min(imageData.width - 1, Math.round(crop.x * imageData.width)));
+  const sourceY = Math.max(0, Math.min(imageData.height - 1, Math.round(crop.y * imageData.height)));
+  const width = Math.max(
+    1,
+    Math.min(imageData.width - sourceX, Math.round(crop.width * imageData.width)),
+  );
+  const height = Math.max(
+    1,
+    Math.min(imageData.height - sourceY, Math.round(crop.height * imageData.height)),
+  );
+  const canvas = document.createElement("canvas");
+  canvas.width = imageData.width;
+  canvas.height = imageData.height;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) throw new Error("Canvas is not available in this browser.");
+
+  context.putImageData(imageData, 0, 0);
+  return context.getImageData(sourceX, sourceY, width, height);
 }
 
 export function detectFabricLayers(imageData: ImageData, requestedCount: number): SegmentationResult {
