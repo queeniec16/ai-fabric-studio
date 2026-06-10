@@ -17,6 +17,8 @@ import {
   loadFabricImage,
   maskToUrl,
   recolorFabric,
+  selectPolygonFabric,
+  SelectionPoint,
   SegmentationResult,
 } from "@/lib/fabric-segmentation";
 
@@ -69,6 +71,12 @@ type CropInteraction = {
   crop: CropRect;
 };
 
+type SelectionMode = "rectangle" | "polygon";
+
+type PointInteraction = {
+  index: number;
+};
+
 const MIN_CROP_SIZE = 0.12;
 
 function clamp(value: number, minimum: number, maximum: number) {
@@ -79,8 +87,12 @@ function CropEditor({
   imageUrl,
   imageWidth,
   imageHeight,
+  selectionMode,
+  onSelectionModeChange,
   crop,
   onChange,
+  polygonPoints,
+  onPolygonPointsChange,
   onConfirm,
   onReplace,
   isLoading,
@@ -88,14 +100,19 @@ function CropEditor({
   imageUrl: string;
   imageWidth: number;
   imageHeight: number;
+  selectionMode: SelectionMode;
+  onSelectionModeChange: (mode: SelectionMode) => void;
   crop: CropRect;
   onChange: (crop: CropRect) => void;
+  polygonPoints: SelectionPoint[];
+  onPolygonPointsChange: (points: SelectionPoint[]) => void;
   onConfirm: () => void;
   onReplace: () => void;
   isLoading: boolean;
 }) {
   const stageRef = useRef<HTMLDivElement>(null);
   const interactionRef = useRef<CropInteraction | null>(null);
+  const pointInteractionRef = useRef<PointInteraction | null>(null);
 
   function startInteraction(
     event: ReactPointerEvent<HTMLDivElement | HTMLButtonElement>,
@@ -189,14 +206,69 @@ function CropEditor({
     });
   }
 
+  function getNormalizedPoint(clientX: number, clientY: number) {
+    const stage = stageRef.current;
+    if (!stage) return null;
+    const bounds = stage.getBoundingClientRect();
+    return {
+      x: clamp((clientX - bounds.left) / bounds.width, 0, 1),
+      y: clamp((clientY - bounds.top) / bounds.height, 0, 1),
+    };
+  }
+
+  function addPolygonPoint(event: ReactPointerEvent<HTMLDivElement>) {
+    if (selectionMode !== "polygon" || pointInteractionRef.current) return;
+    if (event.target !== event.currentTarget && (event.target as HTMLElement).tagName !== "IMG") return;
+    const point = getNormalizedPoint(event.clientX, event.clientY);
+    if (point) onPolygonPointsChange([...polygonPoints, point]);
+  }
+
+  function startPointDrag(event: ReactPointerEvent<HTMLButtonElement>, index: number) {
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    pointInteractionRef.current = { index };
+  }
+
+  function updatePointDrag(event: ReactPointerEvent<HTMLButtonElement>) {
+    const interaction = pointInteractionRef.current;
+    if (!interaction) return;
+    const point = getNormalizedPoint(event.clientX, event.clientY);
+    if (!point) return;
+    onPolygonPointsChange(
+      polygonPoints.map((current, index) => (index === interaction.index ? point : current)),
+    );
+  }
+
+  function stopPointDrag(event: ReactPointerEvent<HTMLButtonElement>) {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    pointInteractionRef.current = null;
+  }
+
   const zoomValue = Math.round(Math.max(crop.width, crop.height) * 100);
+  const polygonBounds = polygonPoints.length
+    ? {
+        width:
+          (Math.max(...polygonPoints.map((point) => point.x)) -
+            Math.min(...polygonPoints.map((point) => point.x))) *
+          imageWidth,
+        height:
+          (Math.max(...polygonPoints.map((point) => point.y)) -
+            Math.min(...polygonPoints.map((point) => point.y))) *
+          imageHeight,
+      }
+    : { width: 0, height: 0 };
+  const polygonPath = polygonPoints.map((point) => `${point.x * 100},${point.y * 100}`).join(" ");
+  const canConfirm = selectionMode === "rectangle" || polygonPoints.length >= 3;
 
   return (
     <div className="crop-workspace">
       <div className="crop-intro">
         <div>
           <p className="section-kicker">FABRIC AREA SELECTION</p>
-          <h3>Crop Fabric Area</h3>
+          <h3>Crop / Select Fabric Area</h3>
           <p>
             Exclude labels, hands, table surfaces, and shadows. Only the selected textile area
             will be analyzed for fabric layers.
@@ -208,100 +280,194 @@ function CropEditor({
       <div className="crop-layout">
         <div
           ref={stageRef}
-          className="crop-stage"
+          className={`crop-stage ${selectionMode === "polygon" ? "polygon-mode" : ""}`}
           style={{ aspectRatio: `${imageWidth} / ${imageHeight}` }}
+          onPointerDown={addPolygonPoint}
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={imageUrl} alt="Uploaded fabric photo ready for cropping" draggable={false} />
-          <div className="crop-shade crop-shade-top" style={{ height: `${crop.y * 100}%` }} />
-          <div
-            className="crop-shade crop-shade-left"
-            style={{
-              top: `${crop.y * 100}%`,
-              width: `${crop.x * 100}%`,
-              height: `${crop.height * 100}%`,
-            }}
-          />
-          <div
-            className="crop-shade crop-shade-right"
-            style={{
-              top: `${crop.y * 100}%`,
-              left: `${(crop.x + crop.width) * 100}%`,
-              right: 0,
-              height: `${crop.height * 100}%`,
-            }}
-          />
-          <div
-            className="crop-shade crop-shade-bottom"
-            style={{ top: `${(crop.y + crop.height) * 100}%` }}
-          />
-          <div
-            className="crop-box"
-            style={{
-              left: `${crop.x * 100}%`,
-              top: `${crop.y * 100}%`,
-              width: `${crop.width * 100}%`,
-              height: `${crop.height * 100}%`,
-            }}
-            onPointerDown={(event) => startInteraction(event, "move")}
-            onPointerMove={updateInteraction}
-            onPointerUp={stopInteraction}
-            onPointerCancel={stopInteraction}
-          >
-            <span className="crop-grid vertical first" />
-            <span className="crop-grid vertical second" />
-            <span className="crop-grid horizontal first" />
-            <span className="crop-grid horizontal second" />
-            {(["nw", "ne", "sw", "se"] as const).map((corner) => (
-              <button
-                key={corner}
-                className={`crop-handle ${corner}`}
-                aria-label={`Resize crop ${corner}`}
-                onPointerDown={(event) => startInteraction(event, corner)}
+          {selectionMode === "rectangle" ? (
+            <>
+              <div className="crop-shade crop-shade-top" style={{ height: `${crop.y * 100}%` }} />
+              <div
+                className="crop-shade crop-shade-left"
+                style={{
+                  top: `${crop.y * 100}%`,
+                  width: `${crop.x * 100}%`,
+                  height: `${crop.height * 100}%`,
+                }}
+              />
+              <div
+                className="crop-shade crop-shade-right"
+                style={{
+                  top: `${crop.y * 100}%`,
+                  left: `${(crop.x + crop.width) * 100}%`,
+                  right: 0,
+                  height: `${crop.height * 100}%`,
+                }}
+              />
+              <div
+                className="crop-shade crop-shade-bottom"
+                style={{ top: `${(crop.y + crop.height) * 100}%` }}
+              />
+              <div
+                className="crop-box"
+                style={{
+                  left: `${crop.x * 100}%`,
+                  top: `${crop.y * 100}%`,
+                  width: `${crop.width * 100}%`,
+                  height: `${crop.height * 100}%`,
+                }}
+                onPointerDown={(event) => startInteraction(event, "move")}
                 onPointerMove={updateInteraction}
                 onPointerUp={stopInteraction}
                 onPointerCancel={stopInteraction}
-              />
-            ))}
-            <span className="crop-move-label">Drag to position fabric area</span>
-          </div>
+              >
+                <span className="crop-grid vertical first" />
+                <span className="crop-grid vertical second" />
+                <span className="crop-grid horizontal first" />
+                <span className="crop-grid horizontal second" />
+                {(["nw", "ne", "sw", "se"] as const).map((corner) => (
+                  <button
+                    key={corner}
+                    className={`crop-handle ${corner}`}
+                    aria-label={`Resize crop ${corner}`}
+                    onPointerDown={(event) => startInteraction(event, corner)}
+                    onPointerMove={updateInteraction}
+                    onPointerUp={stopInteraction}
+                    onPointerCancel={stopInteraction}
+                  />
+                ))}
+                <span className="crop-move-label">Drag to position fabric area</span>
+              </div>
+            </>
+          ) : (
+            <>
+              <svg className="polygon-overlay" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+                <defs>
+                  <mask id="fabric-polygon-mask">
+                    <rect width="100" height="100" fill="white" />
+                    {polygonPoints.length >= 3 && <polygon points={polygonPath} fill="black" />}
+                  </mask>
+                </defs>
+                <rect width="100" height="100" className="polygon-shade" mask="url(#fabric-polygon-mask)" />
+                {polygonPoints.length >= 2 && (
+                  <polyline points={polygonPath} className="polygon-line" />
+                )}
+                {polygonPoints.length >= 3 && (
+                  <line
+                    x1={polygonPoints[polygonPoints.length - 1].x * 100}
+                    y1={polygonPoints[polygonPoints.length - 1].y * 100}
+                    x2={polygonPoints[0].x * 100}
+                    y2={polygonPoints[0].y * 100}
+                    className="polygon-closing-line"
+                  />
+                )}
+              </svg>
+              {polygonPoints.map((point, index) => (
+                <button
+                  key={index}
+                  className="polygon-point"
+                  style={{ left: `${point.x * 100}%`, top: `${point.y * 100}%` }}
+                  aria-label={`Adjust polygon point ${index + 1}`}
+                  onPointerDown={(event) => startPointDrag(event, index)}
+                  onPointerMove={updatePointDrag}
+                  onPointerUp={stopPointDrag}
+                  onPointerCancel={stopPointDrag}
+                >
+                  <span>{index + 1}</span>
+                </button>
+              ))}
+              {polygonPoints.length === 0 && (
+                <span className="polygon-empty-message">Click around the fabric boundary to add points</span>
+              )}
+            </>
+          )}
         </div>
 
         <aside className="crop-controls">
           <div>
-            <p className="crop-control-label">Selection size</p>
-            <div className="crop-zoom-row">
-              <span>Zoom</span>
-              <input
-                type="range"
-                min="12"
-                max="100"
-                value={zoomValue}
-                onChange={(event) => updateZoom(Number(event.target.value))}
-                aria-label="Crop zoom"
-              />
-              <strong>{zoomValue}%</strong>
+            <p className="crop-control-label">Selection method</p>
+            <div className="selection-mode-control">
+              <button
+                className={selectionMode === "rectangle" ? "selected" : ""}
+                onClick={() => onSelectionModeChange("rectangle")}
+              >
+                Rectangle
+              </button>
+              <button
+                className={selectionMode === "polygon" ? "selected" : ""}
+                onClick={() => onSelectionModeChange("polygon")}
+              >
+                Polygon
+              </button>
             </div>
+          </div>
+
+          <div>
+            <p className="crop-control-label">
+              {selectionMode === "rectangle" ? "Selection size" : "Boundary points"}
+            </p>
+            {selectionMode === "rectangle" ? (
+              <div className="crop-zoom-row">
+                <span>Zoom</span>
+                <input
+                  type="range"
+                  min="12"
+                  max="100"
+                  value={zoomValue}
+                  onChange={(event) => updateZoom(Number(event.target.value))}
+                  aria-label="Crop zoom"
+                />
+                <strong>{zoomValue}%</strong>
+              </div>
+            ) : (
+              <div className="polygon-actions">
+                <span>{polygonPoints.length} points</span>
+                <button
+                  onClick={() => onPolygonPointsChange(polygonPoints.slice(0, -1))}
+                  disabled={!polygonPoints.length}
+                >
+                  Undo Last
+                </button>
+                <button
+                  onClick={() => onPolygonPointsChange([])}
+                  disabled={!polygonPoints.length}
+                >
+                  Clear
+                </button>
+              </div>
+            )}
           </div>
 
           <div className="crop-guidance">
             <span className="weave-icon" />
             <p>
               <strong>Choose textile only</strong>
-              Keep the crop inside the physical fabric whenever possible.
+              {selectionMode === "rectangle"
+                ? "Keep the crop inside the physical fabric whenever possible."
+                : "Add points around the real fabric edge, then drag any point to refine it."}
             </p>
           </div>
 
           <div className="crop-dimensions">
             <span>Analysis area</span>
             <strong>
-              {Math.round(imageWidth * crop.width)} × {Math.round(imageHeight * crop.height)} px
+              {selectionMode === "rectangle"
+                ? `${Math.round(imageWidth * crop.width)} × ${Math.round(imageHeight * crop.height)} px`
+                : polygonPoints.length >= 3
+                  ? `${Math.round(polygonBounds.width)} × ${Math.round(polygonBounds.height)} px`
+                  : "Add 3+ points"}
             </strong>
           </div>
 
-          <button className="confirm-crop-button" onClick={onConfirm} disabled={isLoading}>
+          <button
+            className="confirm-crop-button"
+            onClick={onConfirm}
+            disabled={isLoading || !canConfirm}
+          >
             <CropIcon />
-            {isLoading ? "Preparing Fabric..." : "Confirm Crop"}
+            {isLoading ? "Preparing Fabric..." : "Confirm Fabric Area"}
           </button>
         </aside>
       </div>
@@ -404,7 +570,9 @@ export default function Home() {
   const [fileName, setFileName] = useState("");
   const [uploadedUrl, setUploadedUrl] = useState("");
   const [uploadedImage, setUploadedImage] = useState<ImageData | null>(null);
+  const [selectionMode, setSelectionMode] = useState<SelectionMode>("rectangle");
   const [crop, setCrop] = useState<CropRect>({ x: 0.08, y: 0.08, width: 0.84, height: 0.84 });
+  const [polygonPoints, setPolygonPoints] = useState<SelectionPoint[]>([]);
   const [originalUrl, setOriginalUrl] = useState("");
   const [segmentation, setSegmentation] = useState<SegmentationResult | null>(null);
   const [resultUrl, setResultUrl] = useState("");
@@ -430,7 +598,9 @@ export default function Home() {
     setError("");
     setUploadedUrl("");
     setUploadedImage(null);
+    setSelectionMode("rectangle");
     setCrop({ x: 0.08, y: 0.08, width: 0.84, height: 0.84 });
+    setPolygonPoints([]);
     setSegmentation(null);
     setResultUrl("");
     setFileName(file.name);
@@ -453,14 +623,17 @@ export default function Home() {
 
     window.setTimeout(() => {
       try {
-        const cropped = cropFabricImage(uploadedImage, crop);
-        const detected = detectFabricLayers(cropped, layerCount);
+        const selectedFabric =
+          selectionMode === "rectangle"
+            ? cropFabricImage(uploadedImage, crop)
+            : selectPolygonFabric(uploadedImage, polygonPoints);
+        const detected = detectFabricLayers(selectedFabric, layerCount);
         const colors = detected.layers.map((layer) => layer.sourceColor);
-        const croppedUrl = imageDataToUrl(cropped);
-        setOriginalUrl(croppedUrl);
+        const selectedUrl = imageDataToUrl(selectedFabric);
+        setOriginalUrl(selectedUrl);
         setSegmentation(detected);
         setTargetColors(colors);
-        setResultUrl(croppedUrl);
+        setResultUrl(selectedUrl);
         setActiveLayer(0);
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : "Could not crop this fabric image.");
@@ -573,7 +746,7 @@ export default function Home() {
         <div className="workflow-line">
           <span className="current">01 Upload</span>
           <i />
-          <span className={isCropping || hasFabric ? "current" : ""}>02 Crop Area</span>
+          <span className={isCropping || hasFabric ? "current" : ""}>02 Select Area</span>
           <i />
           <span className={hasFabric ? "current" : ""}>03 Detect Layers</span>
           <i />
@@ -620,8 +793,12 @@ export default function Home() {
             imageUrl={uploadedUrl}
             imageWidth={uploadedImage.width}
             imageHeight={uploadedImage.height}
+            selectionMode={selectionMode}
+            onSelectionModeChange={setSelectionMode}
             crop={crop}
             onChange={setCrop}
+            polygonPoints={polygonPoints}
+            onPolygonPointsChange={setPolygonPoints}
             onConfirm={confirmCrop}
             onReplace={() => fileInputRef.current?.click()}
             isLoading={isLoading}

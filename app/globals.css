@@ -365,6 +365,10 @@ button {
   object-fit: fill;
 }
 
+.crop-stage.polygon-mode {
+  cursor: crosshair;
+}
+
 .crop-shade {
   position: absolute;
   z-index: 1;
@@ -484,10 +488,116 @@ button {
   white-space: nowrap;
 }
 
+.polygon-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.polygon-shade {
+  fill: rgba(12, 18, 16, 0.62);
+}
+
+.polygon-line,
+.polygon-closing-line {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.98);
+  stroke-width: 0.32;
+  vector-effect: non-scaling-stroke;
+}
+
+.polygon-line {
+  stroke: var(--green-light);
+}
+
+.polygon-closing-line {
+  stroke-dasharray: 1.1 0.8;
+  opacity: 0.85;
+}
+
+.polygon-point {
+  position: absolute;
+  z-index: 4;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 3px solid white;
+  border-radius: 50%;
+  cursor: grab;
+  color: white;
+  background: var(--green);
+  box-shadow: 0 2px 7px rgba(0, 0, 0, 0.35);
+  transform: translate(-50%, -50%);
+  touch-action: none;
+}
+
+.polygon-point:active {
+  cursor: grabbing;
+}
+
+.polygon-point span {
+  font-size: 7px;
+  font-weight: 800;
+  pointer-events: none;
+}
+
+.polygon-empty-message {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 3;
+  padding: 10px 13px;
+  color: var(--ink);
+  background: rgba(251, 250, 247, 0.9);
+  box-shadow: 0 3px 18px rgba(0, 0, 0, 0.16);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  text-align: center;
+  text-transform: uppercase;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
 .crop-controls {
   padding: 18px;
   border: 1px solid var(--line);
   background: white;
+}
+
+.crop-controls > div + div {
+  margin-top: 17px;
+}
+
+.selection-mode-control {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border: 1px solid #c9c8c1;
+}
+
+.selection-mode-control button {
+  height: 32px;
+  border: 0;
+  border-right: 1px solid #c9c8c1;
+  cursor: pointer;
+  background: transparent;
+  font-size: 8px;
+  font-weight: 750;
+}
+
+.selection-mode-control button:last-child {
+  border-right: 0;
+}
+
+.selection-mode-control button.selected {
+  color: white;
+  background: var(--green);
 }
 
 .crop-control-label {
@@ -520,6 +630,35 @@ button {
 .crop-zoom-row input {
   width: 100%;
   accent-color: var(--green);
+}
+
+.polygon-actions {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.polygon-actions span {
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.polygon-actions button {
+  min-height: 27px;
+  padding: 0 7px;
+  border: 1px solid var(--line);
+  cursor: pointer;
+  color: var(--green);
+  background: #f5f7f4;
+  font-size: 7px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.polygon-actions button:disabled {
+  cursor: default;
+  opacity: 0.4;
 }
 
 .crop-guidance {
@@ -1010,6 +1149,10 @@ footer {
     gap: 0 24px;
   }
 
+  .crop-controls > div + div {
+    margin-top: 0;
+  }
+
   .crop-guidance {
     margin-top: 0;
     border-top: 0;
@@ -1075,6 +1218,10 @@ footer {
 
   .crop-controls {
     display: block;
+  }
+
+  .crop-controls > div + div {
+    margin-top: 17px;
   }
 
   .crop-guidance {

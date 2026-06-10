@@ -30,6 +30,11 @@ export type CropRect = {
   height: number;
 };
 
+export type SelectionPoint = {
+  x: number;
+  y: number;
+};
+
 const MAX_PROCESSING_EDGE = 1100;
 const SAMPLE_LIMIT = 9000;
 const ITERATIONS = 14;
@@ -225,17 +230,75 @@ export function cropFabricImage(imageData: ImageData, crop: CropRect) {
   return context.getImageData(sourceX, sourceY, width, height);
 }
 
+export function selectPolygonFabric(imageData: ImageData, points: SelectionPoint[]) {
+  if (points.length < 3) {
+    throw new Error("Add at least three points around the fabric boundary.");
+  }
+
+  const minimumX = Math.min(...points.map((point) => point.x));
+  const minimumY = Math.min(...points.map((point) => point.y));
+  const maximumX = Math.max(...points.map((point) => point.x));
+  const maximumY = Math.max(...points.map((point) => point.y));
+  const sourceX = Math.max(0, Math.floor(minimumX * imageData.width));
+  const sourceY = Math.max(0, Math.floor(minimumY * imageData.height));
+  const sourceRight = Math.min(imageData.width, Math.ceil(maximumX * imageData.width));
+  const sourceBottom = Math.min(imageData.height, Math.ceil(maximumY * imageData.height));
+  const width = Math.max(1, sourceRight - sourceX);
+  const height = Math.max(1, sourceBottom - sourceY);
+  const sourceCanvas = document.createElement("canvas");
+  sourceCanvas.width = imageData.width;
+  sourceCanvas.height = imageData.height;
+  const sourceContext = sourceCanvas.getContext("2d");
+  if (!sourceContext) throw new Error("Canvas is not available in this browser.");
+  sourceContext.putImageData(imageData, 0, 0);
+
+  const outputCanvas = document.createElement("canvas");
+  outputCanvas.width = width;
+  outputCanvas.height = height;
+  const outputContext = outputCanvas.getContext("2d", { willReadFrequently: true });
+  if (!outputContext) throw new Error("Canvas is not available in this browser.");
+
+  outputContext.save();
+  outputContext.beginPath();
+  points.forEach((point, index) => {
+    const x = point.x * imageData.width - sourceX;
+    const y = point.y * imageData.height - sourceY;
+    if (index === 0) outputContext.moveTo(x, y);
+    else outputContext.lineTo(x, y);
+  });
+  outputContext.closePath();
+  outputContext.clip();
+  outputContext.drawImage(
+    sourceCanvas,
+    sourceX,
+    sourceY,
+    width,
+    height,
+    0,
+    0,
+    width,
+    height,
+  );
+  outputContext.restore();
+
+  return outputContext.getImageData(0, 0, width, height);
+}
+
 export function detectFabricLayers(imageData: ImageData, requestedCount: number): SegmentationResult {
   const { width, height, data } = imageData;
   const pixelCount = width * height;
   const clusterCount = Math.max(2, Math.min(4, requestedCount));
   const stride = Math.max(1, Math.floor(pixelCount / SAMPLE_LIMIT));
   const samples: RGB[] = [];
+  let visiblePixelCount = 0;
 
-  for (let pixel = 0; pixel < pixelCount; pixel += stride) {
+  for (let pixel = 0; pixel < pixelCount; pixel += 1) {
     const offset = pixel * 4;
     if (data[offset + 3] < 128) continue;
-    samples.push({ r: data[offset], g: data[offset + 1], b: data[offset + 2] });
+    visiblePixelCount += 1;
+    if (pixel % stride === 0) {
+      samples.push({ r: data[offset], g: data[offset + 1], b: data[offset + 2] });
+    }
   }
 
   if (samples.length < clusterCount) {
@@ -248,6 +311,7 @@ export function detectFabricLayers(imageData: ImageData, requestedCount: number)
 
   for (let pixel = 0; pixel < pixelCount; pixel += 1) {
     const offset = pixel * 4;
+    if (data[offset + 3] < 128) continue;
     const color = { r: data[offset], g: data[offset + 1], b: data[offset + 2] };
     let nearestIndex = 0;
     let nearestDistance = Number.POSITIVE_INFINITY;
@@ -270,7 +334,7 @@ export function detectFabricLayers(imageData: ImageData, requestedCount: number)
     .map(({ index }) => index);
 
   const layers = sortedIndexes.map((sourceIndex, displayIndex) => {
-    const coverage = (counts[sourceIndex] / pixelCount) * 100;
+    const coverage = (counts[sourceIndex] / visiblePixelCount) * 100;
     const centroid = centroids[sourceIndex];
     const meta = getLayerMeta(
       displayIndex,
