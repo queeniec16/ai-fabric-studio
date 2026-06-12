@@ -34,7 +34,11 @@ Base Color、Normal、Roughness 与 Height 地图，在实时 3D 场景中评估
 - 分别修改 Base、Pattern、Stripe / Jacquard 和 Accent 颜色
 - 保留原始 luminance 与局部纹理进行 recolor
 - 导出配色结果 PNG
-- 从换色结果估算 Base Color、Normal、Roughness 和 Height PBR maps
+- Manual Tile Mode：选择 repeat area、调整 X/Y offset、检查重复效果
+- AI Tile Mode：基于纹理自相关自动估算横向与纵向 pattern repeat
+- 提供 2×2、4×4 与 8×8 seamless repeat preview
+- 使用周期边缘融合减少平铺接缝
+- 从确认后的 seamless texture 估算 Base Color、Normal、Roughness 和 Height PBR maps
 - 单独预览并下载每张材质地图
 - Three.js 实时 3D 材质预览
 - Sphere 与 Fabric Plane 两种预览模型
@@ -62,6 +66,12 @@ Review Ground / Motif / Stripe Masks
 Choose Color for Each Fabric Layer
       ↓
 Apply Color
+      ↓
+Generate Seamless Tile
+      ↓
+Manual Repeat Selection or AI Repeat Detection
+      ↓
+Preview 2×2 / 4×4 / 8×8 Repeats
       ↓
 Generate Material
       ↓
@@ -113,6 +123,7 @@ npm start
 - **Polygon mask:** Canvas clip path with transparent pixels outside the fabric boundary
 - **Segmentation:** K-means dominant color clustering
 - **Mask format:** per-pixel `Uint8Array`
+- **Tile generation:** manual repeat crop, texture autocorrelation, circular offset, periodic edge blending
 - **PBR estimation:** local luminance, blur, contrast, gradient, and normal reconstruction
 - **3D preview:** Three.js, OrbitControls, RoomEnvironment, MeshPhysicalMaterial
 - **Export:** client-side PNG data URLs
@@ -129,6 +140,7 @@ app/page.tsx
   ├── Rectangle and polygon fabric area editor
   ├── Layer controls
   ├── Recolor preview
+  ├── Seamless tile workflow
   ├── Material asset panel
   └── PNG and PBR map export
 
@@ -137,6 +149,12 @@ components/MaterialViewer.tsx
   ├── Sphere and subdivided fabric plane
   ├── PBR texture assignment
   └── Orbit, rotation, zoom, and lighting controls
+
+components/TileStudio.tsx
+  ├── Manual and AI tile mode controls
+  ├── Adjustable repeat-area selection
+  ├── X/Y wrap offset controls
+  └── 2×2, 4×4, and 8×8 repeat preview
 
 lib/fabric-segmentation.ts
   ├── Image loading and resizing
@@ -154,6 +172,13 @@ lib/material-generation.ts
   ├── Height estimation from local texture contrast
   ├── Normal reconstruction from height gradients
   └── Roughness estimation and PNG rendering
+
+lib/seamless-tile.ts
+  ├── Repeat-area extraction
+  ├── Image-based repeat period estimation
+  ├── Circular texture offset
+  ├── Periodic edge blending
+  └── Tiled preview generation
 ```
 
 The segmentation engine is isolated in
@@ -206,7 +231,8 @@ The intended professional vocabulary and interaction model should remain centere
 - The algorithm cannot yet distinguish yarn systems, weave structures, embroidery, or print techniques.
 - PBR maps are image-based estimates and are not calibrated from physical scans.
 - Height and Normal maps may interpret printed contrast as physical relief.
-- Textures are repeated in the 3D viewer but are not yet made seamlessly tileable.
+- AI repeat detection is heuristic and may need manual repeat-area correction on irregular motifs.
+- Periodic edge blending prioritizes seam removal and can soften motifs close to tile boundaries.
 - There is no material scale, DPI, yarn size, or real-world measurement metadata yet.
 
 These are expected constraints of the first MVP, not claims of production-grade AI segmentation.

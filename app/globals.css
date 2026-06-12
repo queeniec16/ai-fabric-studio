@@ -1278,8 +1278,313 @@ button {
 }
 
 .generate-material-button:disabled {
-  cursor: wait;
+  cursor: not-allowed;
   opacity: 0.55;
+}
+
+.tile-studio {
+  margin-top: 42px;
+  padding-top: 34px;
+  border-top: 1px solid var(--line);
+}
+
+.tile-heading {
+  margin-bottom: 22px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 28px;
+}
+
+.tile-heading .section-kicker {
+  margin-bottom: 7px;
+  font-size: 8px;
+}
+
+.tile-heading h2 {
+  margin: 0;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 31px;
+  font-weight: 400;
+}
+
+.tile-heading p:last-child {
+  max-width: 690px;
+  margin: 9px 0 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.6;
+}
+
+.tile-status {
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid #d6c2b7;
+  color: #8b553e;
+  background: #f6ece7;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.tile-status i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.tile-status.ready {
+  border-color: #b9cabe;
+  color: var(--green);
+  background: #edf3ee;
+}
+
+.tile-status.ready i {
+  background: #4d8a65;
+}
+
+.tile-mode-switch {
+  width: min(620px, 100%);
+  margin-bottom: 16px;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  border: 1px solid #c9c8c1;
+}
+
+.tile-mode-switch button {
+  min-height: 58px;
+  padding: 11px 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  border: 0;
+  border-right: 1px solid #c9c8c1;
+  cursor: pointer;
+  background: #fff;
+  text-align: left;
+}
+
+.tile-mode-switch button:last-child {
+  border-right: 0;
+}
+
+.tile-mode-switch button.selected {
+  color: #fff;
+  background: var(--green);
+}
+
+.tile-mode-switch strong {
+  font-size: 9px;
+}
+
+.tile-mode-switch span {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 7px;
+}
+
+.tile-mode-switch button.selected span {
+  color: rgba(255, 255, 255, 0.68);
+}
+
+.tile-workspace {
+  display: grid;
+  grid-template-columns: minmax(330px, 1fr) minmax(230px, 0.58fr) minmax(330px, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.tile-source-stage,
+.tile-preview-stage {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  background: #dedbd2;
+}
+
+.tile-preview-stage {
+  aspect-ratio: 1;
+}
+
+.tile-source-stage > img {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.tile-preview-stage > img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.tile-repeat-box {
+  position: absolute;
+  border: 2px solid #fff;
+  cursor: move;
+  box-shadow: 0 0 0 9999px rgba(17, 28, 24, 0.48), 0 0 0 1px rgba(23, 63, 53, 0.85);
+  touch-action: none;
+}
+
+.tile-repeat-box > span {
+  position: absolute;
+  top: 7px;
+  left: 7px;
+  padding: 4px 6px;
+  color: #fff;
+  background: rgba(23, 63, 53, 0.88);
+  font-size: 7px;
+  font-weight: 800;
+  letter-spacing: 0.7px;
+}
+
+.tile-resize-handle {
+  position: absolute;
+  right: -7px;
+  bottom: -7px;
+  width: 14px;
+  height: 14px;
+  border: 2px solid #fff;
+  cursor: nwse-resize;
+  background: var(--green);
+  touch-action: none;
+}
+
+.tile-controls {
+  padding: 16px;
+  border: 1px solid var(--line);
+  background: #fff;
+}
+
+.tile-control-label {
+  margin: 0 0 16px;
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.9px;
+  text-transform: uppercase;
+}
+
+.tile-controls label {
+  margin-bottom: 15px;
+  display: block;
+}
+
+.tile-controls label > span {
+  margin-bottom: 6px;
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.tile-controls input {
+  width: 100%;
+  accent-color: var(--green);
+}
+
+.tile-method-note {
+  margin: 18px 0;
+  padding: 13px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.tile-method-note strong {
+  font-size: 9px;
+}
+
+.tile-method-note p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 8px;
+  line-height: 1.55;
+}
+
+.create-tile-button {
+  width: 100%;
+  min-height: 41px;
+  padding: 8px;
+  border: 0;
+  cursor: pointer;
+  color: #fff;
+  background: var(--green);
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+
+.create-tile-button:disabled {
+  cursor: wait;
+  opacity: 0.58;
+}
+
+.tile-repeat-options {
+  display: flex;
+  border: 1px solid #c9c8c1;
+}
+
+.tile-repeat-options button {
+  height: 24px;
+  padding: 0 7px;
+  border: 0;
+  border-right: 1px solid #c9c8c1;
+  cursor: pointer;
+  background: #fff;
+  font-size: 7px;
+  font-weight: 800;
+}
+
+.tile-repeat-options button:last-child {
+  border-right: 0;
+}
+
+.tile-repeat-options button.selected {
+  color: #fff;
+  background: var(--green);
+}
+
+.tile-preview-stage.empty {
+  display: grid;
+  place-items: center;
+  background: #eeece6;
+}
+
+.tile-preview-stage.empty > div {
+  max-width: 250px;
+  padding: 20px;
+  text-align: center;
+}
+
+.tile-preview-grid {
+  width: 74px;
+  height: 74px;
+  margin: 0 auto 15px;
+  display: block;
+  border: 1px solid #aeb4af;
+  background:
+    linear-gradient(#aeb4af 1px, transparent 1px),
+    linear-gradient(90deg, #aeb4af 1px, transparent 1px);
+  background-size: 25% 25%;
+}
+
+.tile-preview-stage strong {
+  display: block;
+  font-size: 9px;
+}
+
+.tile-preview-stage p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 8px;
+  line-height: 1.5;
 }
 
 .material-lab {
@@ -1645,6 +1950,14 @@ footer {
     grid-template-columns: 1fr;
   }
 
+  .tile-workspace {
+    grid-template-columns: 1fr 0.65fr;
+  }
+
+  .tile-workspace > div:last-child {
+    grid-column: 1 / -1;
+  }
+
   .material-viewer-stage {
     min-height: 520px;
   }
@@ -1712,6 +2025,28 @@ footer {
 
   .material-lab-heading {
     flex-direction: column;
+  }
+
+  .tile-heading {
+    flex-direction: column;
+  }
+
+  .tile-workspace,
+  .tile-mode-switch {
+    grid-template-columns: 1fr;
+  }
+
+  .tile-mode-switch button {
+    border-right: 0;
+    border-bottom: 1px solid #c9c8c1;
+  }
+
+  .tile-mode-switch button:last-child {
+    border-bottom: 0;
+  }
+
+  .tile-workspace > div:last-child {
+    grid-column: auto;
   }
 
   .material-map-grid {

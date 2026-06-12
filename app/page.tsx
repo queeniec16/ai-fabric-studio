@@ -24,12 +24,14 @@ import {
   SegmentationResult,
 } from "@/lib/fabric-segmentation";
 import MaterialViewer from "@/components/MaterialViewer";
+import TileStudio from "@/components/TileStudio";
 import {
   FabricMaterialAsset,
   generateFabricMaterial,
   materialMapEntries,
   MaterialMapAsset,
 } from "@/lib/material-generation";
+import type { SeamlessTextureAsset } from "@/lib/seamless-tile";
 
 type IconProps = { className?: string };
 
@@ -686,6 +688,7 @@ export default function Home() {
   const [resultUrl, setResultUrl] = useState("");
   const [resultImageData, setResultImageData] = useState<ImageData | null>(null);
   const [material, setMaterial] = useState<FabricMaterialAsset | null>(null);
+  const [seamlessTexture, setSeamlessTexture] = useState<SeamlessTextureAsset | null>(null);
   const [targetColors, setTargetColors] = useState<string[]>([]);
   const [layerCount, setLayerCount] = useState(4);
   const [activeLayer, setActiveLayer] = useState(0);
@@ -716,6 +719,7 @@ export default function Home() {
     setResultUrl("");
     setResultImageData(null);
     setMaterial(null);
+    setSeamlessTexture(null);
     setFileName(file.name);
 
     try {
@@ -753,6 +757,7 @@ export default function Home() {
         setResultUrl(selectedUrl);
         setResultImageData(selectedFabric);
         setMaterial(null);
+        setSeamlessTexture(null);
         setActiveLayer(0);
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : "Could not crop this fabric image.");
@@ -768,6 +773,7 @@ export default function Home() {
     setResultUrl("");
     setResultImageData(null);
     setMaterial(null);
+    setSeamlessTexture(null);
     setTargetColors([]);
   }
 
@@ -807,6 +813,7 @@ export default function Home() {
         setResultUrl(imageDataToUrl(detected.original));
         setResultImageData(detected.original);
         setMaterial(null);
+        setSeamlessTexture(null);
         setActiveLayer(0);
       } finally {
         setIsLoading(false);
@@ -824,6 +831,7 @@ export default function Home() {
     setResultImageData(recolored);
     setResultUrl(imageDataToUrl(recolored));
     setMaterial(null);
+    setSeamlessTexture(null);
   }
 
   function resetColors() {
@@ -833,16 +841,17 @@ export default function Home() {
     setResultUrl(imageDataToUrl(segmentation.original));
     setResultImageData(segmentation.original);
     setMaterial(null);
+    setSeamlessTexture(null);
   }
 
   function generateMaterial() {
-    if (!resultImageData) return;
+    if (!seamlessTexture) return;
     setIsLoading(true);
     setError("");
 
     window.setTimeout(() => {
       try {
-        setMaterial(generateFabricMaterial(resultImageData));
+        setMaterial(generateFabricMaterial(seamlessTexture.imageData));
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : "Could not generate material maps.");
       } finally {
@@ -904,11 +913,13 @@ export default function Home() {
           <i />
           <span className={resultUrl ? "current" : ""}>04 Recolor</span>
           <i />
-          <span className={material ? "current" : ""}>05 Material</span>
+          <span className={seamlessTexture ? "current" : ""}>05 Tile</span>
           <i />
-          <span className={material ? "current" : ""}>06 3D</span>
+          <span className={material ? "current" : ""}>06 Material</span>
           <i />
-          <span className={material ? "current" : ""}>07 Export</span>
+          <span className={material ? "current" : ""}>07 3D</span>
+          <i />
+          <span className={material ? "current" : ""}>08 Export</span>
         </div>
       </section>
 
@@ -1076,18 +1087,31 @@ export default function Home() {
               <button
                 className="generate-material-button"
                 onClick={generateMaterial}
-                disabled={isLoading || !resultImageData}
+                disabled={isLoading || !seamlessTexture}
               >
                 <MaterialIcon />
                 {isLoading
                   ? "Generating Maps..."
                   : material
                     ? "Regenerate Material"
-                    : "Generate Material"}
+                    : seamlessTexture
+                      ? "Generate Material"
+                      : "Create Seamless Tile First"}
               </button>
-              <p className="export-note">Exports at analyzed resolution · transparent-safe PNG</p>
+              <p className="export-note">PBR maps are generated from the confirmed seamless tile</p>
             </div>
           </div>
+          {resultImageData && (
+            <TileStudio
+              source={resultImageData}
+              sourceUrl={resultUrl}
+              asset={seamlessTexture}
+              onChange={(nextAsset) => {
+                setSeamlessTexture(nextAsset);
+                setMaterial(null);
+              }}
+            />
+          )}
           {material && (
             <section className="material-lab">
               <div className="material-lab-heading">
@@ -1095,8 +1119,8 @@ export default function Home() {
                   <p className="section-kicker">DIGITAL MATERIAL ASSET</p>
                   <h2>Generated Fabric Material</h2>
                   <p>
-                    Image-estimated PBR maps preserve the colorway while adding plausible yarn
-                    relief, surface roughness, and environment response.
+                    All maps are derived from the confirmed seamless texture, preserving the
+                    colorway while adding plausible yarn relief and surface response.
                   </p>
                 </div>
                 <span className="material-ready-badge"><i /> Material ready</span>
@@ -1135,7 +1159,7 @@ export default function Home() {
                     <MaterialIcon />
                     <p>
                       <strong>Extensible material schema</strong>
-                      Ready for AO, metallic, tileable textures, structure recognition, and
+                      Ready for AO, metallic, structure recognition, and
                       CLO / Browzwear / Unreal export adapters.
                     </p>
                   </div>
