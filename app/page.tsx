@@ -23,6 +23,13 @@ import {
   SelectionPoint,
   SegmentationResult,
 } from "@/lib/fabric-segmentation";
+import MaterialViewer from "@/components/MaterialViewer";
+import {
+  FabricMaterialAsset,
+  generateFabricMaterial,
+  materialMapEntries,
+  MaterialMapAsset,
+} from "@/lib/material-generation";
 
 type IconProps = { className?: string };
 
@@ -62,6 +69,15 @@ function CropIcon({ className }: IconProps) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden="true">
       <path d="M7 3v14a2 2 0 0 0 2 2h12M3 7h14a2 2 0 0 1 2 2v12" />
+    </svg>
+  );
+}
+
+function MaterialIcon({ className }: IconProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="m12 3 8 4.5-8 4.5-8-4.5L12 3Z" />
+      <path d="m4 12 8 4.5 8-4.5M4 16.5 12 21l8-4.5" />
     </svg>
   );
 }
@@ -668,6 +684,8 @@ export default function Home() {
   const [originalUrl, setOriginalUrl] = useState("");
   const [segmentation, setSegmentation] = useState<SegmentationResult | null>(null);
   const [resultUrl, setResultUrl] = useState("");
+  const [resultImageData, setResultImageData] = useState<ImageData | null>(null);
+  const [material, setMaterial] = useState<FabricMaterialAsset | null>(null);
   const [targetColors, setTargetColors] = useState<string[]>([]);
   const [layerCount, setLayerCount] = useState(4);
   const [activeLayer, setActiveLayer] = useState(0);
@@ -696,6 +714,8 @@ export default function Home() {
     setPolygonClosed(false);
     setSegmentation(null);
     setResultUrl("");
+    setResultImageData(null);
+    setMaterial(null);
     setFileName(file.name);
 
     try {
@@ -731,6 +751,8 @@ export default function Home() {
         setSegmentation(detected);
         setTargetColors(colors);
         setResultUrl(selectedUrl);
+        setResultImageData(selectedFabric);
+        setMaterial(null);
         setActiveLayer(0);
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : "Could not crop this fabric image.");
@@ -744,6 +766,8 @@ export default function Home() {
     setSegmentation(null);
     setOriginalUrl("");
     setResultUrl("");
+    setResultImageData(null);
+    setMaterial(null);
     setTargetColors([]);
   }
 
@@ -781,6 +805,8 @@ export default function Home() {
         setSegmentation(detected);
         setTargetColors(colors);
         setResultUrl(imageDataToUrl(detected.original));
+        setResultImageData(detected.original);
+        setMaterial(null);
         setActiveLayer(0);
       } finally {
         setIsLoading(false);
@@ -794,7 +820,10 @@ export default function Home() {
 
   function applyColors() {
     if (!segmentation) return;
-    setResultUrl(imageDataToUrl(recolorFabric(segmentation, targetColors)));
+    const recolored = recolorFabric(segmentation, targetColors);
+    setResultImageData(recolored);
+    setResultUrl(imageDataToUrl(recolored));
+    setMaterial(null);
   }
 
   function resetColors() {
@@ -802,6 +831,24 @@ export default function Home() {
     const colors = segmentation.layers.map((layer) => layer.sourceColor);
     setTargetColors(colors);
     setResultUrl(imageDataToUrl(segmentation.original));
+    setResultImageData(segmentation.original);
+    setMaterial(null);
+  }
+
+  function generateMaterial() {
+    if (!resultImageData) return;
+    setIsLoading(true);
+    setError("");
+
+    window.setTimeout(() => {
+      try {
+        setMaterial(generateFabricMaterial(resultImageData));
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : "Could not generate material maps.");
+      } finally {
+        setIsLoading(false);
+      }
+    }, 80);
   }
 
   function downloadResult() {
@@ -810,6 +857,14 @@ export default function Home() {
     const baseName = fileName.replace(/\.[^/.]+$/, "") || "fabric";
     link.download = `${baseName}-recolor.png`;
     link.href = resultUrl;
+    link.click();
+  }
+
+  function downloadMaterialMap(map: MaterialMapAsset) {
+    const link = document.createElement("a");
+    const baseName = fileName.replace(/\.[^/.]+$/, "") || "fabric";
+    link.download = `${baseName}-${map.fileSuffix}.png`;
+    link.href = map.url;
     link.click();
   }
 
@@ -827,18 +882,18 @@ export default function Home() {
           </span>
           <span>
             <strong>AI Fabric Studio</strong>
-            <small>Layer Recolor Lab</small>
+            <small>Digital Material Lab</small>
           </span>
         </div>
         <div className="prototype-badge"><span /> Local MVP</div>
       </header>
 
       <section className="hero">
-        <p className="eyebrow">TEXTILE COLOR DEVELOPMENT</p>
-        <h1>Recolor the structure.<br />Preserve the fabric.</h1>
+        <p className="eyebrow">DIGITAL TEXTILE MATERIAL DEVELOPMENT</p>
+        <h1>Recolor the structure.<br />Build the material.</h1>
         <p className="hero-copy">
-          Detect ground, motif, and woven color regions from a fabric image, then develop new
-          colorways while retaining the original textile texture.
+          Detect textile layers, develop new colorways, then generate physically based maps
+          and inspect the fabric response in real-time 3D.
         </p>
         <div className="workflow-line">
           <span className="current">01 Upload</span>
@@ -849,7 +904,11 @@ export default function Home() {
           <i />
           <span className={resultUrl ? "current" : ""}>04 Recolor</span>
           <i />
-          <span>05 Export</span>
+          <span className={material ? "current" : ""}>05 Material</span>
+          <i />
+          <span className={material ? "current" : ""}>06 3D</span>
+          <i />
+          <span className={material ? "current" : ""}>07 Export</span>
         </div>
       </section>
 
@@ -903,6 +962,7 @@ export default function Home() {
             isLoading={isLoading}
           />
         ) : segmentation && originalUrl ? (
+          <>
           <div className="workspace-grid">
             <div className="visual-column">
               <div className="panel-label">
@@ -1013,9 +1073,85 @@ export default function Home() {
                 <DownloadIcon />
                 Download PNG
               </button>
+              <button
+                className="generate-material-button"
+                onClick={generateMaterial}
+                disabled={isLoading || !resultImageData}
+              >
+                <MaterialIcon />
+                {isLoading
+                  ? "Generating Maps..."
+                  : material
+                    ? "Regenerate Material"
+                    : "Generate Material"}
+              </button>
               <p className="export-note">Exports at analyzed resolution · transparent-safe PNG</p>
             </div>
           </div>
+          {material && (
+            <section className="material-lab">
+              <div className="material-lab-heading">
+                <div>
+                  <p className="section-kicker">DIGITAL MATERIAL ASSET</p>
+                  <h2>Generated Fabric Material</h2>
+                  <p>
+                    Image-estimated PBR maps preserve the colorway while adding plausible yarn
+                    relief, surface roughness, and environment response.
+                  </p>
+                </div>
+                <span className="material-ready-badge"><i /> Material ready</span>
+              </div>
+
+              <div className="material-lab-grid">
+                <div className="material-assets-column">
+                  <div className="panel-label">
+                    <span>Material Asset Panel</span>
+                    <span className="layer-total">{material.width} × {material.height}px</span>
+                  </div>
+                  <div className="material-map-grid">
+                    {materialMapEntries(material).map((map) => (
+                      <article className="material-map-card" key={map.kind}>
+                        <div className={`material-map-preview ${map.kind}`}>
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={map.url} alt={`${map.label} map`} />
+                          <span>{map.kind === "baseColor" ? "sRGB" : "Linear"}</span>
+                        </div>
+                        <div className="material-map-copy">
+                          <div>
+                            <strong>{map.label}</strong>
+                            <small>{map.description}</small>
+                          </div>
+                          <button
+                            onClick={() => downloadMaterialMap(map)}
+                            aria-label={`Download ${map.label} map`}
+                          >
+                            <DownloadIcon />
+                          </button>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                  <div className="future-material-note">
+                    <MaterialIcon />
+                    <p>
+                      <strong>Extensible material schema</strong>
+                      Ready for AO, metallic, tileable textures, structure recognition, and
+                      CLO / Browzwear / Unreal export adapters.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="material-preview-column">
+                  <div className="panel-label">
+                    <span>Real-Time 3D Material Preview</span>
+                    <span className="result-status"><i /> PBR active</span>
+                  </div>
+                  <MaterialViewer material={material} />
+                </div>
+              </div>
+            </section>
+          )}
+          </>
         ) : null}
 
         {error && <p className="error-message">{error}</p>}
@@ -1029,8 +1165,8 @@ export default function Home() {
       </section>
 
       <footer>
-        <span>AI Fabric Studio · Local Prototype</span>
-        <span>Color-based segmentation engine · SAM-ready architecture</span>
+        <span>AI Fabric Studio · Digital Material Prototype</span>
+        <span>Layer detection · PBR generation · Three.js preview · AI-ready architecture</span>
       </footer>
     </main>
   );
