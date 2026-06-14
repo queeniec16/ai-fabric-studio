@@ -9,15 +9,18 @@ import {
 } from "react";
 import type { CropRect } from "@/lib/fabric-segmentation";
 import {
+  createOffsetPreview,
   createTiledPreview,
   detectRepeatArea,
-  generateSeamlessTexture,
+  fixTileSeams,
+  generateTileDraft,
   SeamlessTextureAsset,
   TileMode,
   TileRepeat,
 } from "@/lib/seamless-tile";
 
 const MIN_REPEAT_SIZE = 0.16;
+const QUALITY_WARNING_THRESHOLD = 82;
 
 function clamp(value: number, minimum: number, maximum: number) {
   return Math.max(minimum, Math.min(maximum, value));
@@ -43,7 +46,7 @@ export default function TileStudio({
 }) {
   const stageRef = useRef<HTMLDivElement>(null);
   const interactionRef = useRef<Interaction | null>(null);
-  const onChangeRef = useRef(onChange);
+  const invalidateRef = useRef<() => void>(() => {});
   const [mode, setMode] = useState<TileMode>("manual");
   const [repeatRect, setRepeatRect] = useState<CropRect>({
     x: 0.12,
@@ -53,17 +56,30 @@ export default function TileStudio({
   });
   const [offsetX, setOffsetX] = useState(0);
   const [offsetY, setOffsetY] = useState(0);
+  const [blendStrength, setBlendStrength] = useState(50);
   const [repeat, setRepeat] = useState<TileRepeat>(4);
+  const [draft, setDraft] = useState<SeamlessTextureAsset | null>(null);
+  const [showOffsetPreview, setShowOffsetPreview] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
 
-  const previewUrl = useMemo(
-    () => (asset ? createTiledPreview(asset.imageData, repeat) : ""),
-    [asset, repeat],
-  );
+  function invalidateTile() {
+    setDraft(null);
+    setShowOffsetPreview(false);
+    onChange(null);
+  }
 
   useEffect(() => {
-    onChangeRef.current = onChange;
-  }, [onChange]);
+    invalidateRef.current = invalidateTile;
+  });
+
+  const tiledPreviewUrl = useMemo(
+    () => (draft ? createTiledPreview(draft.imageData, repeat) : ""),
+    [draft, repeat],
+  );
+  const offsetPreviewUrl = useMemo(
+    () => (draft ? createOffsetPreview(draft.imageData) : ""),
+    [draft],
+  );
 
   useEffect(() => {
     const move = (event: PointerEvent) => {
@@ -73,16 +89,15 @@ export default function TileStudio({
       const bounds = stage.getBoundingClientRect();
       const dx = (event.clientX - interaction.pointerX) / bounds.width;
       const dy = (event.clientY - interaction.pointerY) / bounds.height;
+      invalidateRef.current();
 
       if (interaction.mode === "move") {
-        onChangeRef.current(null);
         setRepeatRect({
           ...interaction.rect,
           x: clamp(interaction.rect.x + dx, 0, 1 - interaction.rect.width),
           y: clamp(interaction.rect.y + dy, 0, 1 - interaction.rect.height),
         });
       } else {
-        onChangeRef.current(null);
         setRepeatRect({
           ...interaction.rect,
           width: clamp(interaction.rect.width + dx, MIN_REPEAT_SIZE, 1 - interaction.rect.x),
@@ -114,7 +129,7 @@ export default function TileStudio({
 
   function selectMode(nextMode: TileMode) {
     setMode(nextMode);
-    onChange(null);
+    invalidateTile();
     if (nextMode === "ai") {
       setRepeatRect(detectRepeatArea(source));
       setOffsetX(50);
@@ -127,10 +142,31 @@ export default function TileStudio({
     window.setTimeout(() => {
       const rect = mode === "ai" ? detectRepeatArea(source) : repeatRect;
       if (mode === "ai") setRepeatRect(rect);
-      onChange(generateSeamlessTexture(source, mode, rect, offsetX, offsetY));
+      setDraft(generateTileDraft(source, mode, rect, offsetX, offsetY, blendStrength));
+      setShowOffsetPreview(false);
+      onChange(null);
       setIsGenerating(false);
     }, 80);
   }
+
+  function fixSeam() {
+    if (!draft) return;
+    setIsGenerating(true);
+    window.setTimeout(() => {
+      setDraft(fixTileSeams(draft, blendStrength));
+      setShowOffsetPreview(true);
+      onChange(null);
+      setIsGenerating(false);
+    }, 80);
+  }
+
+  function confirmTile() {
+    if (!draft?.fixed) return;
+    onChange(draft);
+  }
+
+  const activePreviewUrl = showOffsetPreview ? offsetPreviewUrl : tiledPreviewUrl;
+  const seamWarning = Boolean(draft && draft.seamQuality < QUALITY_WARNING_THRESHOLD);
 
   return (
     <section className="tile-studio">
@@ -139,19 +175,19 @@ export default function TileStudio({
           <p className="section-kicker">SEAMLESS TEXTURE DEVELOPMENT</p>
           <h2>Generate Seamless Tile</h2>
           <p>
-            Define the textile repeat before PBR generation. Edge blending removes visible seams
-            while preserving pattern rhythm and yarn detail.
+            Build and inspect a true textile repeat before PBR generation. Offset inspection moves
+            border seams to the center so they can be patched and evaluated clearly.
           </p>
         </div>
-        <span className={`tile-status ${asset ? "ready" : ""}`}>
-          <i /> {asset ? "Tile ready" : "Required for PBR"}
+        <span className={`tile-status ${asset ? "ready" : draft?.fixed ? "fixed" : ""}`}>
+          <i /> {asset ? "Seamless tile confirmed" : draft?.fixed ? "Ready to confirm" : "Required for PBR"}
         </span>
       </div>
 
       <div className="tile-mode-switch" aria-label="Tile generation mode">
         <button className={mode === "manual" ? "selected" : ""} onClick={() => selectMode("manual")}>
           <strong>Manual Tile Mode</strong>
-          <span>Select repeat area and tune offset</span>
+          <span>Select repeat area and tune alignment</span>
         </button>
         <button className={mode === "ai" ? "selected" : ""} onClick={() => selectMode("ai")}>
           <strong>AI Tile Mode</strong>
@@ -208,7 +244,7 @@ export default function TileStudio({
                 value={offsetX}
                 onChange={(event) => {
                   setOffsetX(Number(event.target.value));
-                  onChange(null);
+                  invalidateTile();
                 }}
               />
             </label>
@@ -221,7 +257,23 @@ export default function TileStudio({
                 value={offsetY}
                 onChange={(event) => {
                   setOffsetY(Number(event.target.value));
-                  onChange(null);
+                  invalidateTile();
+                }}
+              />
+            </label>
+            <label className="seam-strength-control">
+              <span>Seam Blend Strength <strong>{blendStrength}%</strong></span>
+              <input
+                type="range"
+                min="0"
+                max="100"
+                value={blendStrength}
+                onChange={(event) => {
+                  setBlendStrength(Number(event.target.value));
+                  if (draft?.fixed) {
+                    setDraft({ ...draft, fixed: false });
+                    onChange(null);
+                  }
                 }}
               />
             </label>
@@ -229,43 +281,91 @@ export default function TileStudio({
           <div className="tile-method-note">
             <strong>{mode === "manual" ? "Designer controlled repeat" : "Image-based repeat detection"}</strong>
             <p>
-              {mode === "manual"
-                ? "Move and resize the repeat box, then shift the wrap point away from key motifs."
-                : "The MVP estimates horizontal and vertical periods using texture autocorrelation."}
+              Generate the repeat, inspect its centered seams, then use Fix Seam before confirming
+              the texture for PBR generation.
             </p>
           </div>
-          <button className="create-tile-button" onClick={generate} disabled={isGenerating}>
-            {isGenerating ? "Building Seamless Texture..." : mode === "manual" ? "Create Manual Tile" : "Generate AI Tile"}
-          </button>
+          <div className="tile-action-stack">
+            <button className="create-tile-button" onClick={generate} disabled={isGenerating}>
+              {isGenerating ? "Processing Texture..." : mode === "manual" ? "Generate Tile" : "Generate AI Tile"}
+            </button>
+            <button
+              className="offset-preview-button"
+              onClick={() => setShowOffsetPreview((current) => !current)}
+              disabled={!draft}
+            >
+              {showOffsetPreview ? "Show Repeat Preview" : "Offset Preview 50%"}
+            </button>
+            <button className="fix-seam-button" onClick={fixSeam} disabled={!draft || isGenerating}>
+              Fix Seam
+            </button>
+          </div>
         </aside>
 
         <div>
           <div className="panel-label">
-            <span>Tiled Fabric Preview</span>
-            <div className="tile-repeat-options">
-              {([2, 4, 8] as TileRepeat[]).map((count) => (
-                <button
-                  key={count}
-                  className={repeat === count ? "selected" : ""}
-                  onClick={() => setRepeat(count)}
-                >
-                  {count}×{count}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className={`tile-preview-stage ${asset ? "" : "empty"}`}>
-            {asset ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={previewUrl} alt={`${repeat} by ${repeat} seamless fabric repeat preview`} />
-            ) : (
-              <div>
-                <span className="tile-preview-grid" />
-                <strong>Generate a tile to inspect repeat continuity</strong>
-                <p>Check motif spacing and edge transitions at 2×2, 4×4, or 8×8.</p>
+            <span>{showOffsetPreview ? "50% Offset Seam Inspection" : "Tile Quality Preview"}</span>
+            {!showOffsetPreview && (
+              <div className="tile-repeat-options">
+                {([2, 4, 8] as TileRepeat[]).map((count) => (
+                  <button
+                    key={count}
+                    className={repeat === count ? "selected" : ""}
+                    onClick={() => setRepeat(count)}
+                  >
+                    {count}×{count}
+                  </button>
+                ))}
               </div>
             )}
           </div>
+          <div className={`tile-preview-stage ${draft ? "" : "empty"} ${showOffsetPreview ? "offset" : ""}`}>
+            {draft ? (
+              <>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={activePreviewUrl}
+                  alt={
+                    showOffsetPreview
+                      ? "50 percent offset seam inspection"
+                      : `${repeat} by ${repeat} seamless fabric repeat preview`
+                  }
+                />
+                {showOffsetPreview && <span className="offset-crosshair" />}
+              </>
+            ) : (
+              <div>
+                <span className="tile-preview-grid" />
+                <strong>Generate a tile to begin seam inspection</strong>
+                <p>Then offset, patch, and inspect the result at multiple repeat scales.</p>
+              </div>
+            )}
+          </div>
+
+          {draft && (
+            <div className={`seam-quality ${seamWarning ? "warning" : "pass"}`}>
+              <div>
+                <span>Seam quality estimate</span>
+                <strong>{draft.seamQuality}/100</strong>
+              </div>
+              <div className="seam-quality-track">
+                <i style={{ width: `${draft.seamQuality}%` }} />
+              </div>
+              {seamWarning ? (
+                <p>Seam may still be visible. Try adjusting repeat area or increasing blend strength.</p>
+              ) : (
+                <p>Border continuity looks suitable for repeat preview. Inspect motifs before confirming.</p>
+              )}
+            </div>
+          )}
+
+          <button
+            className="confirm-tile-button"
+            onClick={confirmTile}
+            disabled={!draft?.fixed || Boolean(asset && asset === draft)}
+          >
+            {asset && asset === draft ? "Seamless Tile Confirmed" : "Confirm Seamless Tile"}
+          </button>
         </div>
       </div>
     </section>

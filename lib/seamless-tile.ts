@@ -10,10 +10,18 @@ export type SeamlessTextureAsset = {
   sourceRect: CropRect;
   offsetX: number;
   offsetY: number;
+  blendStrength: number;
+  seamQuality: number;
+  fixed: boolean;
 };
 
 function clamp(value: number, minimum: number, maximum: number) {
   return Math.max(minimum, Math.min(maximum, value));
+}
+
+function smoothstep(value: number) {
+  const clamped = clamp(value, 0, 1);
+  return clamped * clamped * (3 - 2 * clamped);
 }
 
 function imageDataToUrl(imageData: ImageData) {
@@ -24,6 +32,10 @@ function imageDataToUrl(imageData: ImageData) {
   if (!context) throw new Error("Canvas is not available in this browser.");
   context.putImageData(imageData, 0, 0);
   return canvas.toDataURL("image/png");
+}
+
+function copyImageData(source: ImageData) {
+  return new ImageData(new Uint8ClampedArray(source.data), source.width, source.height);
 }
 
 function cropImageData(source: ImageData, rect: CropRect) {
@@ -37,17 +49,14 @@ function cropImageData(source: ImageData, rect: CropRect) {
     for (let x = 0; x < width; x += 1) {
       const sourceOffset = ((sourceY + y) * source.width + sourceX + x) * 4;
       const outputOffset = (y * width + x) * 4;
-      output.data[outputOffset] = source.data[sourceOffset];
-      output.data[outputOffset + 1] = source.data[sourceOffset + 1];
-      output.data[outputOffset + 2] = source.data[sourceOffset + 2];
-      output.data[outputOffset + 3] = source.data[sourceOffset + 3];
+      output.data.set(source.data.subarray(sourceOffset, sourceOffset + 4), outputOffset);
     }
   }
 
   return output;
 }
 
-function circularOffset(source: ImageData, offsetX: number, offsetY: number) {
+export function circularOffset(source: ImageData, offsetX: number, offsetY: number) {
   const output = new ImageData(source.width, source.height);
   const shiftX = Math.round((offsetX / 100) * source.width);
   const shiftY = Math.round((offsetY / 100) * source.height);
@@ -65,45 +74,207 @@ function circularOffset(source: ImageData, offsetX: number, offsetY: number) {
   return output;
 }
 
-function blendPeriodicEdges(source: ImageData) {
-  const output = new ImageData(new Uint8ClampedArray(source.data), source.width, source.height);
-  const blendX = Math.max(2, Math.round(source.width * 0.16));
-  const blendY = Math.max(2, Math.round(source.height * 0.16));
+function edgeAverage(source: ImageData, side: "left" | "right" | "top" | "bottom", depth: number) {
+  const values = [0, 0, 0];
+  let samples = 0;
+
+  if (side === "left" || side === "right") {
+    const start = side === "left" ? 0 : source.width - depth;
+    for (let y = 0; y < source.height; y += 2) {
+      for (let x = start; x < start + depth; x += 1) {
+        const offset = (y * source.width + x) * 4;
+        if (source.data[offset + 3] === 0) continue;
+        values[0] += source.data[offset];
+        values[1] += source.data[offset + 1];
+        values[2] += source.data[offset + 2];
+        samples += 1;
+      }
+    }
+  } else {
+    const start = side === "top" ? 0 : source.height - depth;
+    for (let y = start; y < start + depth; y += 1) {
+      for (let x = 0; x < source.width; x += 2) {
+        const offset = (y * source.width + x) * 4;
+        if (source.data[offset + 3] === 0) continue;
+        values[0] += source.data[offset];
+        values[1] += source.data[offset + 1];
+        values[2] += source.data[offset + 2];
+        samples += 1;
+      }
+    }
+  }
+
+  return values.map((value) => value / Math.max(1, samples));
+}
+
+function matchBorderColor(source: ImageData, strength: number) {
+  const output = copyImageData(source);
+  const amount = clamp(strength / 100, 0, 1);
+  if (amount === 0) return output;
+  const depthX = Math.max(2, Math.round(source.width * (0.08 + amount * 0.12)));
+  const depthY = Math.max(2, Math.round(source.height * (0.08 + amount * 0.12)));
+  const left = edgeAverage(source, "left", depthX);
+  const right = edgeAverage(source, "right", depthX);
+  const top = edgeAverage(source, "top", depthY);
+  const bottom = edgeAverage(source, "bottom", depthY);
+  const horizontalDelta = left.map((value, channel) => (right[channel] - value) * 0.5);
+  const verticalDelta = top.map((value, channel) => (bottom[channel] - value) * 0.5);
 
   for (let y = 0; y < source.height; y += 1) {
-    for (let x = 0; x < blendX; x += 1) {
+    const topWeight = y < depthY ? smoothstep(1 - y / depthY) * amount : 0;
+    const bottomDistance = source.height - 1 - y;
+    const bottomWeight =
+      bottomDistance < depthY ? smoothstep(1 - bottomDistance / depthY) * amount : 0;
+
+    for (let x = 0; x < source.width; x += 1) {
+      const leftWeight = x < depthX ? smoothstep(1 - x / depthX) * amount : 0;
+      const rightDistance = source.width - 1 - x;
+      const rightWeight =
+        rightDistance < depthX ? smoothstep(1 - rightDistance / depthX) * amount : 0;
+      const offset = (y * source.width + x) * 4;
+      for (let channel = 0; channel < 3; channel += 1) {
+        const adjustment =
+          horizontalDelta[channel] * (leftWeight - rightWeight) +
+          verticalDelta[channel] * (topWeight - bottomWeight);
+        output.data[offset + channel] = clamp(source.data[offset + channel] + adjustment, 0, 255);
+      }
+    }
+  }
+
+  return output;
+}
+
+function patchCenteredSeam(source: ImageData, axis: "x" | "y", strength: number) {
+  const output = copyImageData(source);
+  const amount = clamp(strength / 100, 0, 1);
+  if (amount === 0) return output;
+  const length = axis === "x" ? source.width : source.height;
+  const crossLength = axis === "x" ? source.height : source.width;
+  const center = Math.floor(length / 2);
+  const halfBand = Math.max(2, Math.round(length * (0.015 + amount * 0.065)));
+  const leftAnchor = clamp(center - halfBand - 1, 0, length - 1);
+  const rightAnchor = clamp(center + halfBand + 1, 0, length - 1);
+
+  for (let cross = 0; cross < crossLength; cross += 1) {
+    for (let primary = center - halfBand; primary <= center + halfBand; primary += 1) {
+      if (primary < 0 || primary >= length) continue;
+      const progress = (primary - (center - halfBand)) / Math.max(1, halfBand * 2);
+      const blend = smoothstep(progress);
+      const outputPixel = axis === "x" ? cross * source.width + primary : primary * source.width + cross;
+      const leftPixel = axis === "x" ? cross * source.width + leftAnchor : leftAnchor * source.width + cross;
+      const rightPixel = axis === "x" ? cross * source.width + rightAnchor : rightAnchor * source.width + cross;
+      const outputOffset = outputPixel * 4;
+      const leftOffset = leftPixel * 4;
+      const rightOffset = rightPixel * 4;
+
+      for (let channel = 0; channel < 3; channel += 1) {
+        const crossfade =
+          source.data[leftOffset + channel] * (1 - blend) +
+          source.data[rightOffset + channel] * blend;
+        const originalWeight = Math.abs(progress - 0.5) * 2 * (1 - amount * 0.45);
+        output.data[outputOffset + channel] = clamp(
+          crossfade * (1 - originalWeight) +
+            source.data[outputOffset + channel] * originalWeight,
+          0,
+          255,
+        );
+      }
+      output.data[outputOffset + 3] = Math.max(
+        source.data[leftOffset + 3],
+        source.data[rightOffset + 3],
+      );
+    }
+  }
+
+  return output;
+}
+
+function enforcePeriodicBoundary(source: ImageData, strength: number) {
+  const output = copyImageData(source);
+  const amount = clamp(strength / 100, 0, 1);
+  const depthX = Math.max(1, Math.round(source.width * (0.015 + amount * 0.035)));
+  const depthY = Math.max(1, Math.round(source.height * (0.015 + amount * 0.035)));
+
+  for (let y = 0; y < source.height; y += 1) {
+    for (let x = 0; x < depthX; x += 1) {
       const oppositeX = source.width - 1 - x;
-      const strength = 1 - x / blendX;
+      const weight = smoothstep(1 - x / depthX) * amount;
       const leftOffset = (y * source.width + x) * 4;
       const rightOffset = (y * source.width + oppositeX) * 4;
       for (let channel = 0; channel < 4; channel += 1) {
         const average = (source.data[leftOffset + channel] + source.data[rightOffset + channel]) / 2;
         output.data[leftOffset + channel] =
-          source.data[leftOffset + channel] * (1 - strength) + average * strength;
+          source.data[leftOffset + channel] * (1 - weight) + average * weight;
         output.data[rightOffset + channel] =
-          source.data[rightOffset + channel] * (1 - strength) + average * strength;
+          source.data[rightOffset + channel] * (1 - weight) + average * weight;
       }
     }
   }
 
   const horizontalPass = new Uint8ClampedArray(output.data);
-  for (let y = 0; y < blendY; y += 1) {
+  for (let y = 0; y < depthY; y += 1) {
     const oppositeY = source.height - 1 - y;
-    const strength = 1 - y / blendY;
+    const weight = smoothstep(1 - y / depthY) * amount;
     for (let x = 0; x < source.width; x += 1) {
       const topOffset = (y * source.width + x) * 4;
       const bottomOffset = (oppositeY * source.width + x) * 4;
       for (let channel = 0; channel < 4; channel += 1) {
         const average = (horizontalPass[topOffset + channel] + horizontalPass[bottomOffset + channel]) / 2;
         output.data[topOffset + channel] =
-          horizontalPass[topOffset + channel] * (1 - strength) + average * strength;
+          horizontalPass[topOffset + channel] * (1 - weight) + average * weight;
         output.data[bottomOffset + channel] =
-          horizontalPass[bottomOffset + channel] * (1 - strength) + average * strength;
+          horizontalPass[bottomOffset + channel] * (1 - weight) + average * weight;
       }
     }
   }
 
   return output;
+}
+
+export function assessSeamQuality(source: ImageData) {
+  let difference = 0;
+  let samples = 0;
+
+  for (let y = 0; y < source.height; y += 2) {
+    const left = y * source.width * 4;
+    const right = (y * source.width + source.width - 1) * 4;
+    for (let channel = 0; channel < 3; channel += 1) {
+      difference += Math.abs(source.data[left + channel] - source.data[right + channel]);
+      samples += 1;
+    }
+  }
+
+  for (let x = 0; x < source.width; x += 2) {
+    const top = x * 4;
+    const bottom = ((source.height - 1) * source.width + x) * 4;
+    for (let channel = 0; channel < 3; channel += 1) {
+      difference += Math.abs(source.data[top + channel] - source.data[bottom + channel]);
+      samples += 1;
+    }
+  }
+
+  const normalizedDifference = difference / Math.max(1, samples) / 255;
+  return Math.round(clamp(100 - normalizedDifference * 420, 0, 100));
+}
+
+function assessPatchConfidence(before: ImageData, after: ImageData) {
+  let changedDifference = 0;
+  let changedSamples = 0;
+
+  for (let offset = 0; offset < before.data.length; offset += 4) {
+    const difference =
+      (Math.abs(before.data[offset] - after.data[offset]) +
+        Math.abs(before.data[offset + 1] - after.data[offset + 1]) +
+        Math.abs(before.data[offset + 2] - after.data[offset + 2])) /
+      3;
+    if (difference < 3) continue;
+    changedDifference += difference;
+    changedSamples += 1;
+  }
+
+  if (changedSamples === 0) return 100;
+  const averageChangedDifference = changedDifference / changedSamples / 255;
+  return Math.round(clamp(100 - averageChangedDifference * 145, 0, 100));
 }
 
 function luminanceSample(source: ImageData, maxSize = 128) {
@@ -150,8 +321,7 @@ function findPeriod(values: Float32Array, width: number, height: number, axis: "
         samples += 1;
       }
     }
-    const overlapPenalty = 1 + period / length * 0.08;
-    const score = difference / Math.max(1, samples) * overlapPenalty;
+    const score = difference / Math.max(1, samples) * (1 + period / length * 0.08);
     if (score < bestScore) {
       bestScore = score;
       bestPeriod = period;
@@ -176,25 +346,51 @@ export function detectRepeatArea(source: ImageData): CropRect {
   };
 }
 
-export function generateSeamlessTexture(
+export function generateTileDraft(
   source: ImageData,
   mode: TileMode,
   sourceRect: CropRect,
   offsetX: number,
   offsetY: number,
+  blendStrength: number,
 ): SeamlessTextureAsset {
   const repeatArea = cropImageData(source, sourceRect);
   const offset = circularOffset(repeatArea, offsetX, offsetY);
-  const seamless = blendPeriodicEdges(offset);
+  const matched = matchBorderColor(offset, blendStrength);
 
   return {
     mode,
-    imageData: seamless,
-    url: imageDataToUrl(seamless),
+    imageData: matched,
+    url: imageDataToUrl(matched),
     sourceRect,
     offsetX,
     offsetY,
+    blendStrength,
+    seamQuality: assessSeamQuality(matched),
+    fixed: false,
   };
+}
+
+export function fixTileSeams(asset: SeamlessTextureAsset, blendStrength: number) {
+  const offset = circularOffset(asset.imageData, 50, 50);
+  const verticalPatch = patchCenteredSeam(offset, "x", blendStrength);
+  const horizontalPatch = patchCenteredSeam(verticalPatch, "y", blendStrength);
+  const seamless = enforcePeriodicBoundary(horizontalPatch, blendStrength);
+  const boundaryQuality = assessSeamQuality(seamless);
+  const patchConfidence = assessPatchConfidence(offset, seamless);
+
+  return {
+    ...asset,
+    imageData: seamless,
+    url: imageDataToUrl(seamless),
+    blendStrength,
+    seamQuality: Math.min(boundaryQuality, patchConfidence),
+    fixed: true,
+  };
+}
+
+export function createOffsetPreview(source: ImageData) {
+  return imageDataToUrl(circularOffset(source, 50, 50));
 }
 
 export function createTiledPreview(source: ImageData, repeat: TileRepeat, size = 720) {

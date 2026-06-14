@@ -37,7 +37,11 @@ Base Color、Normal、Roughness 与 Height 地图，在实时 3D 场景中评估
 - Manual Tile Mode：选择 repeat area、调整 X/Y offset、检查重复效果
 - AI Tile Mode：基于纹理自相关自动估算横向与纵向 pattern repeat
 - 提供 2×2、4×4 与 8×8 seamless repeat preview
-- 使用周期边缘融合减少平铺接缝
+- 50% Offset Preview 将边界接缝移动到中心进行检查
+- Fix Seam 使用颜色匹配、feather blending、clone-style crossfade 和 soft mask 修补
+- Seam Blend Strength 可在 0–100% 范围调节
+- 自动估算 seam quality，并在接缝风险较高时显示提示
+- 只有确认后的 seamless tile 才能进入 PBR map generation
 - 从确认后的 seamless texture 估算 Base Color、Normal、Roughness 和 Height PBR maps
 - 单独预览并下载每张材质地图
 - Three.js 实时 3D 材质预览
@@ -71,7 +75,13 @@ Generate Seamless Tile
       ↓
 Manual Repeat Selection or AI Repeat Detection
       ↓
+Offset Preview
+      ↓
+Fix Seam and Review Quality
+      ↓
 Preview 2×2 / 4×4 / 8×8 Repeats
+      ↓
+Confirm Seamless Tile
       ↓
 Generate Material
       ↓
@@ -123,7 +133,7 @@ npm start
 - **Polygon mask:** Canvas clip path with transparent pixels outside the fabric boundary
 - **Segmentation:** K-means dominant color clustering
 - **Mask format:** per-pixel `Uint8Array`
-- **Tile generation:** manual repeat crop, texture autocorrelation, circular offset, periodic edge blending
+- **Tile generation:** repeat detection, circular offset, border color matching, feather blending, clone-style crossfade
 - **PBR estimation:** local luminance, blur, contrast, gradient, and normal reconstruction
 - **3D preview:** Three.js, OrbitControls, RoomEnvironment, MeshPhysicalMaterial
 - **Export:** client-side PNG data URLs
@@ -153,7 +163,9 @@ components/MaterialViewer.tsx
 components/TileStudio.tsx
   ├── Manual and AI tile mode controls
   ├── Adjustable repeat-area selection
-  ├── X/Y wrap offset controls
+  ├── X/Y wrap offset and seam strength controls
+  ├── 50% offset seam inspection
+  ├── seam fixing and quality estimate
   └── 2×2, 4×4, and 8×8 repeat preview
 
 lib/fabric-segmentation.ts
@@ -177,7 +189,9 @@ lib/seamless-tile.ts
   ├── Repeat-area extraction
   ├── Image-based repeat period estimation
   ├── Circular texture offset
-  ├── Periodic edge blending
+  ├── Border color and periodic edge matching
+  ├── Center seam feather and clone-style patching
+  ├── Seam quality estimation
   └── Tiled preview generation
 ```
 

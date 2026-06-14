@@ -1344,8 +1344,15 @@ button {
   background: #edf3ee;
 }
 
-.tile-status.ready i {
+.tile-status.ready i,
+.tile-status.fixed i {
   background: #4d8a65;
+}
+
+.tile-status.fixed {
+  border-color: #c5cbb6;
+  color: #52643d;
+  background: #f0f2e7;
 }
 
 .tile-mode-switch {
@@ -1424,6 +1431,38 @@ button {
   object-fit: cover;
 }
 
+.tile-preview-stage.offset > img {
+  object-fit: contain;
+}
+
+.offset-crosshair {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.offset-crosshair::before,
+.offset-crosshair::after {
+  position: absolute;
+  content: "";
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: 0 0 0 1px rgba(23, 63, 53, 0.65);
+}
+
+.offset-crosshair::before {
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+}
+
+.offset-crosshair::after {
+  top: 50%;
+  right: 0;
+  left: 0;
+  height: 1px;
+}
+
 .tile-repeat-box {
   position: absolute;
   border: 2px solid #fff;
@@ -1476,6 +1515,12 @@ button {
   display: block;
 }
 
+.tile-controls label.seam-strength-control {
+  margin-top: 21px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
 .tile-controls label > span {
   margin-bottom: 6px;
   display: flex;
@@ -1507,22 +1552,48 @@ button {
   line-height: 1.55;
 }
 
-.create-tile-button {
+.tile-action-stack {
+  display: grid;
+  gap: 7px;
+}
+
+.create-tile-button,
+.offset-preview-button,
+.fix-seam-button,
+.confirm-tile-button {
   width: 100%;
   min-height: 41px;
   padding: 8px;
-  border: 0;
   cursor: pointer;
-  color: #fff;
-  background: var(--green);
   font-size: 8px;
   font-weight: 800;
   letter-spacing: 0.6px;
   text-transform: uppercase;
 }
 
-.create-tile-button:disabled {
-  cursor: wait;
+.create-tile-button {
+  border: 0;
+  color: #fff;
+  background: var(--green);
+}
+
+.offset-preview-button {
+  border: 1px solid #b9c4bd;
+  color: var(--green);
+  background: #f1f5f2;
+}
+
+.fix-seam-button {
+  border: 1px solid var(--accent);
+  color: #8b4d34;
+  background: #f8eee9;
+}
+
+.create-tile-button:disabled,
+.offset-preview-button:disabled,
+.fix-seam-button:disabled,
+.confirm-tile-button:disabled {
+  cursor: not-allowed;
   opacity: 0.58;
 }
 
@@ -1585,6 +1656,70 @@ button {
   color: var(--muted);
   font-size: 8px;
   line-height: 1.5;
+}
+
+.seam-quality {
+  margin-top: 10px;
+  padding: 11px;
+  border: 1px solid var(--line);
+  background: #fff;
+}
+
+.seam-quality > div:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 750;
+  text-transform: uppercase;
+}
+
+.seam-quality > div:first-child strong {
+  color: var(--ink);
+  font-size: 9px;
+}
+
+.seam-quality-track {
+  height: 4px;
+  margin-top: 8px;
+  overflow: hidden;
+  background: #e7e5df;
+}
+
+.seam-quality-track i {
+  height: 100%;
+  display: block;
+  background: #4d8a65;
+}
+
+.seam-quality.warning {
+  border-color: #dfc4b8;
+  background: #faf2ee;
+}
+
+.seam-quality.warning .seam-quality-track i {
+  background: var(--accent);
+}
+
+.seam-quality p {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 8px;
+  line-height: 1.45;
+}
+
+.confirm-tile-button {
+  margin-top: 10px;
+  border: 1px solid var(--green);
+  color: #fff;
+  background: var(--green);
+}
+
+.confirm-tile-button:disabled {
+  color: #8b918d;
+  border-color: var(--line);
+  background: #ebe9e3;
 }
 
 .material-lab {
