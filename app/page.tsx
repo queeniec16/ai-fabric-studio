@@ -26,9 +26,11 @@ import {
 import MaterialViewer from "@/components/MaterialViewer";
 import TileStudio from "@/components/TileStudio";
 import {
+  DEFAULT_MATERIAL_SETTINGS,
   FabricMaterialAsset,
   generateFabricMaterial,
   materialMapEntries,
+  MaterialGenerationSettings,
   MaterialMapAsset,
 } from "@/lib/material-generation";
 import type { SeamlessTextureAsset } from "@/lib/seamless-tile";
@@ -688,6 +690,9 @@ export default function Home() {
   const [resultUrl, setResultUrl] = useState("");
   const [resultImageData, setResultImageData] = useState<ImageData | null>(null);
   const [material, setMaterial] = useState<FabricMaterialAsset | null>(null);
+  const [materialSettings, setMaterialSettings] = useState<MaterialGenerationSettings>(
+    DEFAULT_MATERIAL_SETTINGS,
+  );
   const [seamlessTexture, setSeamlessTexture] = useState<SeamlessTextureAsset | null>(null);
   const [targetColors, setTargetColors] = useState<string[]>([]);
   const [layerCount, setLayerCount] = useState(4);
@@ -851,13 +856,24 @@ export default function Home() {
 
     window.setTimeout(() => {
       try {
-        setMaterial(generateFabricMaterial(seamlessTexture.imageData));
+        setMaterial(generateFabricMaterial(seamlessTexture.imageData, materialSettings));
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : "Could not generate material maps.");
       } finally {
         setIsLoading(false);
       }
     }, 80);
+  }
+
+  function updateMaterialSetting(
+    key: keyof MaterialGenerationSettings,
+    value: number,
+  ) {
+    const nextSettings = { ...materialSettings, [key]: value };
+    setMaterialSettings(nextSettings);
+    if (seamlessTexture) {
+      setMaterial(generateFabricMaterial(seamlessTexture.imageData, nextSettings));
+    }
   }
 
   function downloadResult() {
@@ -872,7 +888,7 @@ export default function Home() {
   function downloadMaterialMap(map: MaterialMapAsset) {
     const link = document.createElement("a");
     const baseName = fileName.replace(/\.[^/.]+$/, "") || "fabric";
-    link.download = `${baseName}-${map.fileSuffix}.png`;
+    link.download = `${baseName}_${map.fileSuffix}.png`;
     link.href = map.url;
     link.click();
   }
@@ -1132,6 +1148,60 @@ export default function Home() {
                     <span>Material Asset Panel</span>
                     <span className="layer-total">{material.width} × {material.height}px</span>
                   </div>
+                  <div className="material-generation-controls">
+                    <label>
+                      <span>
+                        Metallic Intensity
+                        <strong>{materialSettings.metallicIntensity}%</strong>
+                      </span>
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        value={materialSettings.metallicIntensity}
+                        onChange={(event) =>
+                          updateMaterialSetting(
+                            "metallicIntensity",
+                            Number(event.target.value),
+                          )
+                        }
+                      />
+                    </label>
+                    <label>
+                      <span>
+                        Alpha Threshold
+                        <strong>{materialSettings.alphaThreshold}%</strong>
+                      </span>
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        value={materialSettings.alphaThreshold}
+                        onChange={(event) =>
+                          updateMaterialSetting("alphaThreshold", Number(event.target.value))
+                        }
+                      />
+                    </label>
+                    <label>
+                      <span>
+                        Alpha Strength
+                        <strong>{materialSettings.alphaStrength}%</strong>
+                      </span>
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        value={materialSettings.alphaStrength}
+                        onChange={(event) =>
+                          updateMaterialSetting("alphaStrength", Number(event.target.value))
+                        }
+                      />
+                    </label>
+                    <p>
+                      Metallic defaults to 0 for standard textiles. Increase Alpha Strength only
+                      for lace, mesh, crochet, sheer, or open-knit structures.
+                    </p>
+                  </div>
                   <div className="material-map-grid">
                     {materialMapEntries(material).map((map) => (
                       <article className="material-map-card" key={map.kind}>
@@ -1159,7 +1229,7 @@ export default function Home() {
                     <MaterialIcon />
                     <p>
                       <strong>Extensible material schema</strong>
-                      Ready for AO, metallic, structure recognition, and
+                      Ready for AO, structure recognition, and
                       CLO / Browzwear / Unreal export adapters.
                     </p>
                   </div>

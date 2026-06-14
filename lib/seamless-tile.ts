@@ -2,6 +2,15 @@ import type { CropRect } from "@/lib/fabric-segmentation";
 
 export type TileMode = "manual" | "ai";
 export type TileRepeat = 2 | 4 | 8;
+export type PatchMode = "clone" | "mirror";
+
+export type SeamlessOptions = {
+  blendWidth: number;
+  blendStrength: number;
+  edgeColorMatch: number;
+  texturePreservation: number;
+  patchMode: PatchMode;
+};
 
 export type SeamlessTextureAsset = {
   mode: TileMode;
@@ -10,7 +19,9 @@ export type SeamlessTextureAsset = {
   sourceRect: CropRect;
   offsetX: number;
   offsetY: number;
-  blendStrength: number;
+  options: SeamlessOptions;
+  beforeImageData: ImageData;
+  beforeUrl: string;
   seamQuality: number;
   fixed: boolean;
 };
@@ -107,12 +118,13 @@ function edgeAverage(source: ImageData, side: "left" | "right" | "top" | "bottom
   return values.map((value) => value / Math.max(1, samples));
 }
 
-function matchBorderColor(source: ImageData, strength: number) {
+function matchBorderColor(source: ImageData, options: SeamlessOptions) {
   const output = copyImageData(source);
-  const amount = clamp(strength / 100, 0, 1);
+  const amount = clamp(options.edgeColorMatch / 100, 0, 1);
   if (amount === 0) return output;
-  const depthX = Math.max(2, Math.round(source.width * (0.08 + amount * 0.12)));
-  const depthY = Math.max(2, Math.round(source.height * (0.08 + amount * 0.12)));
+  const widthRatio = clamp(options.blendWidth / 100, 0.03, 0.4);
+  const depthX = Math.max(2, Math.round(source.width * widthRatio));
+  const depthY = Math.max(2, Math.round(source.height * widthRatio));
   const left = edgeAverage(source, "left", depthX);
   const right = edgeAverage(source, "right", depthX);
   const top = edgeAverage(source, "top", depthY);
@@ -144,16 +156,17 @@ function matchBorderColor(source: ImageData, strength: number) {
   return output;
 }
 
-function patchCenteredSeam(source: ImageData, axis: "x" | "y", strength: number) {
+function patchCenteredSeam(source: ImageData, axis: "x" | "y", options: SeamlessOptions) {
   const output = copyImageData(source);
-  const amount = clamp(strength / 100, 0, 1);
+  const amount = clamp(options.blendStrength / 100, 0, 1);
   if (amount === 0) return output;
   const length = axis === "x" ? source.width : source.height;
   const crossLength = axis === "x" ? source.height : source.width;
   const center = Math.floor(length / 2);
-  const halfBand = Math.max(2, Math.round(length * (0.015 + amount * 0.065)));
+  const halfBand = Math.max(2, Math.round(length * clamp(options.blendWidth / 200, 0.02, 0.22)));
   const leftAnchor = clamp(center - halfBand - 1, 0, length - 1);
   const rightAnchor = clamp(center + halfBand + 1, 0, length - 1);
+  const preservation = clamp(options.texturePreservation / 100, 0, 1);
 
   for (let cross = 0; cross < crossLength; cross += 1) {
     for (let primary = center - halfBand; primary <= center + halfBand; primary += 1) {
@@ -166,15 +179,30 @@ function patchCenteredSeam(source: ImageData, axis: "x" | "y", strength: number)
       const outputOffset = outputPixel * 4;
       const leftOffset = leftPixel * 4;
       const rightOffset = rightPixel * 4;
+      const donorPrimary =
+        options.patchMode === "mirror"
+          ? progress < 0.5
+            ? clamp(leftAnchor - (primary - (center - halfBand)), 0, length - 1)
+            : clamp(rightAnchor + (center + halfBand - primary), 0, length - 1)
+          : progress < 0.5
+            ? clamp(leftAnchor - Math.round(halfBand * 0.45), 0, length - 1)
+            : clamp(rightAnchor + Math.round(halfBand * 0.45), 0, length - 1);
+      const donorPixel =
+        axis === "x"
+          ? cross * source.width + donorPrimary
+          : donorPrimary * source.width + cross;
+      const donorOffset = donorPixel * 4;
 
       for (let channel = 0; channel < 3; channel += 1) {
         const crossfade =
           source.data[leftOffset + channel] * (1 - blend) +
           source.data[rightOffset + channel] * blend;
-        const originalWeight = Math.abs(progress - 0.5) * 2 * (1 - amount * 0.45);
+        const anchor = progress < 0.5 ? source.data[leftOffset + channel] : source.data[rightOffset + channel];
+        const donorDetail = source.data[donorOffset + channel] - anchor;
+        const patched = crossfade + donorDetail * preservation * 0.58;
+        const feather = smoothstep(1 - Math.abs(progress - 0.5) * 2) * amount;
         output.data[outputOffset + channel] = clamp(
-          crossfade * (1 - originalWeight) +
-            source.data[outputOffset + channel] * originalWeight,
+          source.data[outputOffset + channel] * (1 - feather) + patched * feather,
           0,
           255,
         );
@@ -189,11 +217,12 @@ function patchCenteredSeam(source: ImageData, axis: "x" | "y", strength: number)
   return output;
 }
 
-function enforcePeriodicBoundary(source: ImageData, strength: number) {
+function enforcePeriodicBoundary(source: ImageData, options: SeamlessOptions) {
   const output = copyImageData(source);
-  const amount = clamp(strength / 100, 0, 1);
-  const depthX = Math.max(1, Math.round(source.width * (0.015 + amount * 0.035)));
-  const depthY = Math.max(1, Math.round(source.height * (0.015 + amount * 0.035)));
+  const amount = clamp(options.blendStrength / 100, 0, 1);
+  const widthRatio = clamp(options.blendWidth / 100, 0.03, 0.4);
+  const depthX = Math.max(1, Math.round(source.width * widthRatio * 0.45));
+  const depthY = Math.max(1, Math.round(source.height * widthRatio * 0.45));
 
   for (let y = 0; y < source.height; y += 1) {
     for (let x = 0; x < depthX; x += 1) {
@@ -352,11 +381,11 @@ export function generateTileDraft(
   sourceRect: CropRect,
   offsetX: number,
   offsetY: number,
-  blendStrength: number,
+  options: SeamlessOptions,
 ): SeamlessTextureAsset {
   const repeatArea = cropImageData(source, sourceRect);
   const offset = circularOffset(repeatArea, offsetX, offsetY);
-  const matched = matchBorderColor(offset, blendStrength);
+  const matched = matchBorderColor(offset, options);
 
   return {
     mode,
@@ -365,17 +394,20 @@ export function generateTileDraft(
     sourceRect,
     offsetX,
     offsetY,
-    blendStrength,
+    options,
+    beforeImageData: offset,
+    beforeUrl: imageDataToUrl(offset),
     seamQuality: assessSeamQuality(matched),
     fixed: false,
   };
 }
 
-export function fixTileSeams(asset: SeamlessTextureAsset, blendStrength: number) {
-  const offset = circularOffset(asset.imageData, 50, 50);
-  const verticalPatch = patchCenteredSeam(offset, "x", blendStrength);
-  const horizontalPatch = patchCenteredSeam(verticalPatch, "y", blendStrength);
-  const seamless = enforcePeriodicBoundary(horizontalPatch, blendStrength);
+export function fixTileSeams(asset: SeamlessTextureAsset, options: SeamlessOptions) {
+  const colorMatched = matchBorderColor(asset.beforeImageData, options);
+  const offset = circularOffset(colorMatched, 50, 50);
+  const verticalPatch = patchCenteredSeam(offset, "x", options);
+  const horizontalPatch = patchCenteredSeam(verticalPatch, "y", options);
+  const seamless = enforcePeriodicBoundary(horizontalPatch, options);
   const boundaryQuality = assessSeamQuality(seamless);
   const patchConfidence = assessPatchConfidence(offset, seamless);
 
@@ -383,7 +415,7 @@ export function fixTileSeams(asset: SeamlessTextureAsset, blendStrength: number)
     ...asset,
     imageData: seamless,
     url: imageDataToUrl(seamless),
-    blendStrength,
+    options,
     seamQuality: Math.min(boundaryQuality, patchConfidence),
     fixed: true,
   };

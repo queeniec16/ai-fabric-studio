@@ -14,13 +14,15 @@ import {
   detectRepeatArea,
   fixTileSeams,
   generateTileDraft,
+  PatchMode,
+  SeamlessOptions,
   SeamlessTextureAsset,
   TileMode,
   TileRepeat,
 } from "@/lib/seamless-tile";
 
 const MIN_REPEAT_SIZE = 0.16;
-const QUALITY_WARNING_THRESHOLD = 82;
+const QUALITY_WARNING_THRESHOLD = 84;
 
 function clamp(value: number, minimum: number, maximum: number) {
   return Math.max(minimum, Math.min(maximum, value));
@@ -56,10 +58,15 @@ export default function TileStudio({
   });
   const [offsetX, setOffsetX] = useState(0);
   const [offsetY, setOffsetY] = useState(0);
-  const [blendStrength, setBlendStrength] = useState(50);
+  const [blendWidth, setBlendWidth] = useState(18);
+  const [blendStrength, setBlendStrength] = useState(65);
+  const [edgeColorMatch, setEdgeColorMatch] = useState(70);
+  const [texturePreservation, setTexturePreservation] = useState(75);
+  const [patchMode, setPatchMode] = useState<PatchMode>("clone");
   const [repeat, setRepeat] = useState<TileRepeat>(4);
   const [draft, setDraft] = useState<SeamlessTextureAsset | null>(null);
   const [showOffsetPreview, setShowOffsetPreview] = useState(false);
+  const [comparison, setComparison] = useState<"before" | "after">("after");
   const [isGenerating, setIsGenerating] = useState(false);
 
   function invalidateTile() {
@@ -71,15 +78,6 @@ export default function TileStudio({
   useEffect(() => {
     invalidateRef.current = invalidateTile;
   });
-
-  const tiledPreviewUrl = useMemo(
-    () => (draft ? createTiledPreview(draft.imageData, repeat) : ""),
-    [draft, repeat],
-  );
-  const offsetPreviewUrl = useMemo(
-    () => (draft ? createOffsetPreview(draft.imageData) : ""),
-    [draft],
-  );
 
   useEffect(() => {
     const move = (event: PointerEvent) => {
@@ -142,8 +140,9 @@ export default function TileStudio({
     window.setTimeout(() => {
       const rect = mode === "ai" ? detectRepeatArea(source) : repeatRect;
       if (mode === "ai") setRepeatRect(rect);
-      setDraft(generateTileDraft(source, mode, rect, offsetX, offsetY, blendStrength));
+      setDraft(generateTileDraft(source, mode, rect, offsetX, offsetY, seamlessOptions));
       setShowOffsetPreview(false);
+      setComparison("before");
       onChange(null);
       setIsGenerating(false);
     }, 80);
@@ -153,8 +152,9 @@ export default function TileStudio({
     if (!draft) return;
     setIsGenerating(true);
     window.setTimeout(() => {
-      setDraft(fixTileSeams(draft, blendStrength));
+      setDraft(fixTileSeams(draft, seamlessOptions));
       setShowOffsetPreview(true);
+      setComparison("after");
       onChange(null);
       setIsGenerating(false);
     }, 80);
@@ -165,8 +165,35 @@ export default function TileStudio({
     onChange(draft);
   }
 
-  const activePreviewUrl = showOffsetPreview ? offsetPreviewUrl : tiledPreviewUrl;
+  const seamlessOptions: SeamlessOptions = {
+    blendWidth,
+    blendStrength,
+    edgeColorMatch,
+    texturePreservation,
+    patchMode,
+  };
+  const comparisonImage = draft
+    ? comparison === "before"
+      ? draft.beforeImageData
+      : draft.imageData
+    : null;
+  const tiledComparisonUrl = useMemo(
+    () => (comparisonImage ? createTiledPreview(comparisonImage, repeat) : ""),
+    [comparisonImage, repeat],
+  );
+  const offsetComparisonUrl = useMemo(
+    () => (comparisonImage ? createOffsetPreview(comparisonImage) : ""),
+    [comparisonImage],
+  );
+  const activePreviewUrl = showOffsetPreview ? offsetComparisonUrl : tiledComparisonUrl;
   const seamWarning = Boolean(draft && draft.seamQuality < QUALITY_WARNING_THRESHOLD);
+
+  function invalidateFixedDraft() {
+    if (!draft) return;
+    setDraft({ ...draft, fixed: false });
+    setComparison("before");
+    onChange(null);
+  }
 
   return (
     <section className="tile-studio">
@@ -179,8 +206,19 @@ export default function TileStudio({
             border seams to the center so they can be patched and evaluated clearly.
           </p>
         </div>
-        <span className={`tile-status ${asset ? "ready" : draft?.fixed ? "fixed" : ""}`}>
-          <i /> {asset ? "Seamless tile confirmed" : draft?.fixed ? "Ready to confirm" : "Required for PBR"}
+        <span
+          className={`tile-status ${
+            asset ? "ready" : draft?.fixed && !seamWarning ? "fixed" : ""
+          }`}
+        >
+          <i />{" "}
+          {asset
+            ? "Seamless tile confirmed"
+            : draft?.fixed && seamWarning
+              ? "Seam review required"
+              : draft?.fixed
+                ? "Ready to confirm"
+                : "Required for PBR"}
         </span>
       </div>
 
@@ -262,6 +300,19 @@ export default function TileStudio({
               />
             </label>
             <label className="seam-strength-control">
+              <span>Blend Width <strong>{blendWidth}%</strong></span>
+              <input
+                type="range"
+                min="5"
+                max="40"
+                value={blendWidth}
+                onChange={(event) => {
+                  setBlendWidth(Number(event.target.value));
+                  invalidateFixedDraft();
+                }}
+              />
+            </label>
+            <label>
               <span>Seam Blend Strength <strong>{blendStrength}%</strong></span>
               <input
                 type="range"
@@ -270,13 +321,53 @@ export default function TileStudio({
                 value={blendStrength}
                 onChange={(event) => {
                   setBlendStrength(Number(event.target.value));
-                  if (draft?.fixed) {
-                    setDraft({ ...draft, fixed: false });
-                    onChange(null);
-                  }
+                  invalidateFixedDraft();
                 }}
               />
             </label>
+            <label>
+              <span>Edge Color Match <strong>{edgeColorMatch}%</strong></span>
+              <input
+                type="range"
+                min="0"
+                max="100"
+                value={edgeColorMatch}
+                onChange={(event) => {
+                  setEdgeColorMatch(Number(event.target.value));
+                  invalidateFixedDraft();
+                }}
+              />
+            </label>
+            <label>
+              <span>Texture Preservation <strong>{texturePreservation}%</strong></span>
+              <input
+                type="range"
+                min="0"
+                max="100"
+                value={texturePreservation}
+                onChange={(event) => {
+                  setTexturePreservation(Number(event.target.value));
+                  invalidateFixedDraft();
+                }}
+              />
+            </label>
+            <div className="patch-mode-control">
+              <span className="tile-control-label">Patch mode</span>
+              <div className="viewer-segmented">
+                {(["clone", "mirror"] as PatchMode[]).map((value) => (
+                  <button
+                    key={value}
+                    className={patchMode === value ? "selected" : ""}
+                    onClick={() => {
+                      setPatchMode(value);
+                      invalidateFixedDraft();
+                    }}
+                  >
+                    {value === "clone" ? "Clone Patch" : "Mirror Patch"}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
           <div className="tile-method-note">
             <strong>{mode === "manual" ? "Designer controlled repeat" : "Image-based repeat detection"}</strong>
@@ -305,19 +396,38 @@ export default function TileStudio({
         <div>
           <div className="panel-label">
             <span>{showOffsetPreview ? "50% Offset Seam Inspection" : "Tile Quality Preview"}</span>
-            {!showOffsetPreview && (
-              <div className="tile-repeat-options">
-                {([2, 4, 8] as TileRepeat[]).map((count) => (
+            <div className="tile-preview-controls">
+              {draft && (
+                <div className="before-after-toggle">
                   <button
-                    key={count}
-                    className={repeat === count ? "selected" : ""}
-                    onClick={() => setRepeat(count)}
+                    className={comparison === "before" ? "selected" : ""}
+                    onClick={() => setComparison("before")}
                   >
-                    {count}×{count}
+                    Before
                   </button>
-                ))}
-              </div>
-            )}
+                  <button
+                    className={comparison === "after" ? "selected" : ""}
+                    onClick={() => setComparison("after")}
+                    disabled={!draft.fixed}
+                  >
+                    After
+                  </button>
+                </div>
+              )}
+              {!showOffsetPreview && (
+                <div className="tile-repeat-options">
+                  {([2, 4, 8] as TileRepeat[]).map((count) => (
+                    <button
+                      key={count}
+                      className={repeat === count ? "selected" : ""}
+                      onClick={() => setRepeat(count)}
+                    >
+                      {count}×{count}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
           <div className={`tile-preview-stage ${draft ? "" : "empty"} ${showOffsetPreview ? "offset" : ""}`}>
             {draft ? (
@@ -362,7 +472,7 @@ export default function TileStudio({
           <button
             className="confirm-tile-button"
             onClick={confirmTile}
-            disabled={!draft?.fixed || Boolean(asset && asset === draft)}
+            disabled={!draft?.fixed || seamWarning || Boolean(asset && asset === draft)}
           >
             {asset && asset === draft ? "Seamless Tile Confirmed" : "Confirm Seamless Tile"}
           </button>

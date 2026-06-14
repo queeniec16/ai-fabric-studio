@@ -1,4 +1,22 @@
-export type MaterialMapKind = "baseColor" | "normal" | "roughness" | "height";
+export type MaterialMapKind =
+  | "baseColor"
+  | "normal"
+  | "roughness"
+  | "height"
+  | "metallic"
+  | "alpha";
+
+export type MaterialGenerationSettings = {
+  metallicIntensity: number;
+  alphaThreshold: number;
+  alphaStrength: number;
+};
+
+export const DEFAULT_MATERIAL_SETTINGS: MaterialGenerationSettings = {
+  metallicIntensity: 0,
+  alphaThreshold: 18,
+  alphaStrength: 0,
+};
 
 export type MaterialMapAsset = {
   kind: MaterialMapKind;
@@ -22,7 +40,7 @@ const MAP_META: Record<
   baseColor: {
     label: "Base Color",
     description: "Recolored textile surface and pattern",
-    fileSuffix: "base-color",
+    fileSuffix: "basecolor",
   },
   normal: {
     label: "Normal",
@@ -38,6 +56,16 @@ const MAP_META: Record<
     label: "Height",
     description: "Grayscale textile displacement estimate",
     fileSuffix: "height",
+  },
+  metallic: {
+    label: "Metallic",
+    description: "Reflective yarn, foil, coating, and lurex estimate",
+    fileSuffix: "metallic",
+  },
+  alpha: {
+    label: "Alpha",
+    description: "Opacity estimate for lace, mesh, and open structures",
+    fileSuffix: "alpha",
   },
 };
 
@@ -128,7 +156,10 @@ function makeAsset(kind: MaterialMapKind, imageData: ImageData): MaterialMapAsse
   };
 }
 
-export function generateFabricMaterial(baseColor: ImageData): FabricMaterialAsset {
+export function generateFabricMaterial(
+  baseColor: ImageData,
+  settings: MaterialGenerationSettings = DEFAULT_MATERIAL_SETTINGS,
+): FabricMaterialAsset {
   const { width, height } = baseColor;
   const luminance = luminanceField(baseColor);
   const localAverage = blurField(luminance, width, height, 4);
@@ -177,6 +208,40 @@ export function generateFabricMaterial(baseColor: ImageData): FabricMaterialAsse
     output[offset + 2] = roughness;
   });
 
+  const metallicAmount = Math.max(0, Math.min(1, settings.metallicIntensity / 100));
+  const metallicMap = createMap(baseColor, (pixel, _x, _y, output) => {
+    const brightnessCandidate = Math.max(0, (luminance[pixel] - 168) / 87);
+    const contrastCandidate = Math.min(
+      1,
+      Math.abs(luminance[pixel] - localAverage[pixel]) / 42,
+    );
+    const reflectiveCandidate = Math.min(
+      1,
+      brightnessCandidate * 0.72 + contrastCandidate * 0.48,
+    );
+    const value = clampByte(reflectiveCandidate * metallicAmount * 255);
+    const offset = pixel * 4;
+    output[offset] = value;
+    output[offset + 1] = value;
+    output[offset + 2] = value;
+  });
+
+  const alphaThreshold = Math.max(0, Math.min(100, settings.alphaThreshold)) * 2.55;
+  const alphaAmount = Math.max(0, Math.min(1, settings.alphaStrength / 100));
+  const alphaMap = createMap(baseColor, (pixel, _x, _y, output) => {
+    const sourceAlpha = baseColor.data[pixel * 4 + 3] / 255;
+    const holeCandidate =
+      alphaThreshold > 0
+        ? Math.max(0, Math.min(1, (alphaThreshold - luminance[pixel]) / alphaThreshold))
+        : 0;
+    const opacity = sourceAlpha * (1 - holeCandidate * alphaAmount);
+    const value = clampByte(opacity * 255);
+    const offset = pixel * 4;
+    output[offset] = value;
+    output[offset + 1] = value;
+    output[offset + 2] = value;
+  });
+
   const baseColorCopy = new ImageData(
     new Uint8ClampedArray(baseColor.data),
     baseColor.width,
@@ -191,6 +256,8 @@ export function generateFabricMaterial(baseColor: ImageData): FabricMaterialAsse
       normal: makeAsset("normal", normalMap),
       roughness: makeAsset("roughness", roughnessMap),
       height: makeAsset("height", heightMap),
+      metallic: makeAsset("metallic", metallicMap),
+      alpha: makeAsset("alpha", alphaMap),
     },
   };
 }
@@ -201,5 +268,7 @@ export function materialMapEntries(material: FabricMaterialAsset) {
     material.maps.normal,
     material.maps.roughness,
     material.maps.height,
+    material.maps.metallic,
+    material.maps.alpha,
   ];
 }
