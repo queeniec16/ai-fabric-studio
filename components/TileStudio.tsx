@@ -9,10 +9,12 @@ import {
 } from "react";
 import type { CropRect } from "@/lib/fabric-segmentation";
 import {
+  AITileCandidate,
   createOffsetPreview,
   createTiledPreview,
   detectRepeatArea,
   fixTileSeams,
+  generateAITileCandidates,
   generateTileDraft,
   PatchMode,
   SeamlessOptions,
@@ -65,6 +67,8 @@ export default function TileStudio({
   const [patchMode, setPatchMode] = useState<PatchMode>("clone");
   const [repeat, setRepeat] = useState<TileRepeat>(4);
   const [draft, setDraft] = useState<SeamlessTextureAsset | null>(null);
+  const [aiCandidates, setAiCandidates] = useState<AITileCandidate[]>([]);
+  const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null);
   const [showOffsetPreview, setShowOffsetPreview] = useState(false);
   const [comparison, setComparison] = useState<"before" | "after">("after");
   const [isGenerating, setIsGenerating] = useState(false);
@@ -128,24 +132,55 @@ export default function TileStudio({
   function selectMode(nextMode: TileMode) {
     setMode(nextMode);
     invalidateTile();
+    setAiCandidates([]);
+    setSelectedCandidateId(null);
     if (nextMode === "ai") {
       setRepeatRect(detectRepeatArea(source));
-      setOffsetX(50);
-      setOffsetY(50);
+      setOffsetX(0);
+      setOffsetY(0);
     }
   }
 
   function generate() {
     setIsGenerating(true);
     window.setTimeout(() => {
-      const rect = mode === "ai" ? detectRepeatArea(source) : repeatRect;
-      if (mode === "ai") setRepeatRect(rect);
-      setDraft(generateTileDraft(source, mode, rect, offsetX, offsetY, seamlessOptions));
-      setShowOffsetPreview(false);
-      setComparison("before");
-      onChange(null);
+      if (mode === "ai") {
+        const candidates = generateAITileCandidates(source, 36, 6);
+        setAiCandidates(candidates);
+        setSelectedCandidateId(null);
+        setDraft(null);
+        setRepeatRect(candidates[0]?.sourceRect ?? detectRepeatArea(source));
+        setShowOffsetPreview(false);
+        setComparison("before");
+        onChange(null);
+      } else {
+        setDraft(
+          generateTileDraft(source, mode, repeatRect, offsetX, offsetY, seamlessOptions),
+        );
+        setShowOffsetPreview(false);
+        setComparison("before");
+        onChange(null);
+      }
       setIsGenerating(false);
     }, 80);
+  }
+
+  function selectCandidate(candidate: AITileCandidate) {
+    setSelectedCandidateId(candidate.id);
+    setRepeatRect(candidate.sourceRect);
+    setDraft(
+      generateTileDraft(
+        source,
+        "ai",
+        candidate.sourceRect,
+        offsetX,
+        offsetY,
+        seamlessOptions,
+      ),
+    );
+    setShowOffsetPreview(false);
+    setComparison("before");
+    onChange(null);
   }
 
   function fixSeam() {
@@ -229,14 +264,84 @@ export default function TileStudio({
         </button>
         <button className={mode === "ai" ? "selected" : ""} onClick={() => selectMode("ai")}>
           <strong>AI Tile Mode</strong>
-          <span>Estimate pattern repeat automatically</span>
+          <span>Search multiple repeat areas and compare candidates</span>
         </button>
       </div>
+
+      {mode === "ai" && aiCandidates.length > 0 && (
+        <section className="ai-candidate-panel">
+          <div className="ai-candidate-heading">
+            <div>
+              <p className="section-kicker">RANDOM REPEAT SEARCH</p>
+              <h3>AI Tile Candidates</h3>
+              <p>
+                Compare the visual repeat, not only the score. Select one candidate to continue
+                into offset inspection and seam repair.
+              </p>
+            </div>
+            <button onClick={generate} disabled={isGenerating}>
+              {isGenerating ? "Searching..." : "Regenerate Candidates"}
+            </button>
+          </div>
+          <div className="ai-candidate-grid">
+            {aiCandidates.map((candidate, index) => {
+              const selected = selectedCandidateId === candidate.id;
+              return (
+                <article
+                  className={`ai-candidate-card ${selected ? "selected" : ""}`}
+                  key={candidate.id}
+                >
+                  <div className="ai-candidate-preview">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={candidate.previewUrl}
+                      alt={`Candidate ${String(index + 1).padStart(2, "0")} 2 by 2 repeat`}
+                    />
+                    <span>2×2 preview</span>
+                  </div>
+                  <div className="ai-candidate-copy">
+                    <div>
+                      <strong>Candidate {String(index + 1).padStart(2, "0")}</strong>
+                      <small>
+                        {candidate.imageData.width} × {candidate.imageData.height}px repeat
+                      </small>
+                    </div>
+                    <span
+                      className="candidate-score"
+                      aria-label={`Seam score ${candidate.score}`}
+                      title="Composite seam continuity score"
+                    >
+                      {candidate.score}
+                    </span>
+                  </div>
+                  <div className="candidate-metrics">
+                    <span>H {candidate.metrics.horizontalEdge}</span>
+                    <span>V {candidate.metrics.verticalEdge}</span>
+                    <span>Texture {candidate.metrics.texture}</span>
+                  </div>
+                  <button
+                    className="select-candidate-button"
+                    onClick={() => selectCandidate(candidate)}
+                  >
+                    {selected ? "Candidate Selected" : "Select Candidate"}
+                  </button>
+                </article>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       <div className="tile-workspace">
         <div>
           <div className="panel-label">
-            <span>{mode === "manual" ? "Repeat Area Selection" : "AI Detected Repeat"}</span>
+            <span>
+              {mode === "manual"
+                ? "Repeat Area Selection"
+                : selectedCandidateId
+                  ? "Selected AI Repeat"
+                  : "AI Search Area"}
+            </span>
             <span className="layer-total">
               {Math.round(repeatRect.width * source.width)} × {Math.round(repeatRect.height * source.height)}px
             </span>
@@ -249,7 +354,7 @@ export default function TileStudio({
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={sourceUrl} alt="Recolored textile for repeat selection" draggable={false} />
             <div
-              className="tile-repeat-box"
+              className={`tile-repeat-box ${mode === "ai" ? "ai" : ""}`}
               style={{
                 left: `${repeatRect.x * 100}%`,
                 top: `${repeatRect.y * 100}%`,
@@ -370,15 +475,26 @@ export default function TileStudio({
             </div>
           </div>
           <div className="tile-method-note">
-            <strong>{mode === "manual" ? "Designer controlled repeat" : "Image-based repeat detection"}</strong>
+            <strong>
+              {mode === "manual"
+                ? "Designer controlled repeat"
+                : "Multi-candidate random repeat search"}
+            </strong>
             <p>
-              Generate the repeat, inspect its centered seams, then use Fix Seam before confirming
-              the texture for PBR generation.
+              {mode === "manual"
+                ? "Generate the repeat, inspect its centered seams, then use Fix Seam before confirming the texture for PBR generation."
+                : "Search 36 crop positions and sizes, review the top six visual repeats, then select one for seam repair."}
             </p>
           </div>
           <div className="tile-action-stack">
             <button className="create-tile-button" onClick={generate} disabled={isGenerating}>
-              {isGenerating ? "Processing Texture..." : mode === "manual" ? "Generate Tile" : "Generate AI Tile"}
+              {isGenerating
+                ? mode === "manual"
+                  ? "Processing Texture..."
+                  : "Searching Candidates..."
+                : mode === "manual"
+                  ? "Generate Tile"
+                  : "Generate AI Tile"}
             </button>
             <button
               className="offset-preview-button"

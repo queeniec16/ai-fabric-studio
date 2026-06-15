@@ -26,6 +26,25 @@ export type SeamlessTextureAsset = {
   fixed: boolean;
 };
 
+export type AITileCandidateMetrics = {
+  horizontalEdge: number;
+  verticalEdge: number;
+  brightness: number;
+  color: number;
+  texture: number;
+  pattern: number;
+};
+
+export type AITileCandidate = {
+  id: string;
+  sourceRect: CropRect;
+  imageData: ImageData;
+  url: string;
+  previewUrl: string;
+  score: number;
+  metrics: AITileCandidateMetrics;
+};
+
 function clamp(value: number, minimum: number, maximum: number) {
   return Math.max(minimum, Math.min(maximum, value));
 }
@@ -286,6 +305,126 @@ export function assessSeamQuality(source: ImageData) {
   return Math.round(clamp(100 - normalizedDifference * 420, 0, 100));
 }
 
+function edgeContinuityMetrics(source: ImageData): AITileCandidateMetrics {
+  const edgeDepth = Math.max(2, Math.round(Math.min(source.width, source.height) * 0.04));
+  let horizontalColor = 0;
+  let verticalColor = 0;
+  let horizontalBrightness = 0;
+  let verticalBrightness = 0;
+  let horizontalTexture = 0;
+  let verticalTexture = 0;
+  let horizontalPattern = 0;
+  let verticalPattern = 0;
+  let horizontalSamples = 0;
+  let verticalSamples = 0;
+
+  const samplePixel = (x: number, y: number) => {
+    const offset = (y * source.width + x) * 4;
+    const red = source.data[offset];
+    const green = source.data[offset + 1];
+    const blue = source.data[offset + 2];
+    return {
+      red,
+      green,
+      blue,
+      luminance: red * 0.299 + green * 0.587 + blue * 0.114,
+      alpha: source.data[offset + 3],
+    };
+  };
+
+  for (let y = 1; y < source.height - 1; y += 2) {
+    for (let depth = 0; depth < edgeDepth; depth += 1) {
+      const left = samplePixel(depth, y);
+      const right = samplePixel(source.width - edgeDepth + depth, y);
+      if (left.alpha === 0 || right.alpha === 0) continue;
+      const leftPrevious = samplePixel(depth, y - 1);
+      const rightPrevious = samplePixel(source.width - edgeDepth + depth, y - 1);
+      horizontalColor +=
+        (Math.abs(left.red - right.red) +
+          Math.abs(left.green - right.green) +
+          Math.abs(left.blue - right.blue)) /
+        3;
+      horizontalBrightness += Math.abs(left.luminance - right.luminance);
+      horizontalTexture += Math.abs(
+        Math.abs(left.luminance - leftPrevious.luminance) -
+          Math.abs(right.luminance - rightPrevious.luminance),
+      );
+      horizontalPattern += Math.abs(
+        (left.red - left.blue) - (right.red - right.blue),
+      );
+      horizontalSamples += 1;
+    }
+  }
+
+  for (let x = 1; x < source.width - 1; x += 2) {
+    for (let depth = 0; depth < edgeDepth; depth += 1) {
+      const top = samplePixel(x, depth);
+      const bottom = samplePixel(x, source.height - edgeDepth + depth);
+      if (top.alpha === 0 || bottom.alpha === 0) continue;
+      const topPrevious = samplePixel(x - 1, depth);
+      const bottomPrevious = samplePixel(x - 1, source.height - edgeDepth + depth);
+      verticalColor +=
+        (Math.abs(top.red - bottom.red) +
+          Math.abs(top.green - bottom.green) +
+          Math.abs(top.blue - bottom.blue)) /
+        3;
+      verticalBrightness += Math.abs(top.luminance - bottom.luminance);
+      verticalTexture += Math.abs(
+        Math.abs(top.luminance - topPrevious.luminance) -
+          Math.abs(bottom.luminance - bottomPrevious.luminance),
+      );
+      verticalPattern += Math.abs(
+        (top.green - top.blue) - (bottom.green - bottom.blue),
+      );
+      verticalSamples += 1;
+    }
+  }
+
+  const continuity = (difference: number, samples: number, sensitivity: number) =>
+    Math.round(clamp(100 - (difference / Math.max(1, samples) / 255) * sensitivity, 0, 100));
+
+  const horizontalEdge = continuity(horizontalColor, horizontalSamples, 360);
+  const verticalEdge = continuity(verticalColor, verticalSamples, 360);
+  const brightness = Math.round(
+    (continuity(horizontalBrightness, horizontalSamples, 420) +
+      continuity(verticalBrightness, verticalSamples, 420)) /
+      2,
+  );
+  const color = Math.round((horizontalEdge + verticalEdge) / 2);
+  const texture = Math.round(
+    (continuity(horizontalTexture, horizontalSamples, 520) +
+      continuity(verticalTexture, verticalSamples, 520)) /
+      2,
+  );
+  const pattern = Math.round(
+    (continuity(horizontalPattern, horizontalSamples, 360) +
+      continuity(verticalPattern, verticalSamples, 360)) /
+      2,
+  );
+
+  return { horizontalEdge, verticalEdge, brightness, color, texture, pattern };
+}
+
+function scoreCandidate(metrics: AITileCandidateMetrics) {
+  return Math.round(
+    metrics.horizontalEdge * 0.19 +
+      metrics.verticalEdge * 0.19 +
+      metrics.brightness * 0.16 +
+      metrics.color * 0.16 +
+      metrics.texture * 0.16 +
+      metrics.pattern * 0.14,
+  );
+}
+
+function candidateDistance(first: CropRect, second: CropRect) {
+  return (
+    Math.abs(first.x - second.x) +
+    Math.abs(first.y - second.y) +
+    Math.abs(first.width - second.width) +
+    Math.abs(first.height - second.height)
+  );
+}
+
 function assessPatchConfidence(before: ImageData, after: ImageData) {
   let changedDifference = 0;
   let changedSamples = 0;
@@ -373,6 +512,63 @@ export function detectRepeatArea(source: ImageData): CropRect {
     width,
     height,
   };
+}
+
+export function generateAITileCandidates(
+  source: ImageData,
+  sampleCount = 36,
+  resultCount = 6,
+) {
+  const detected = detectRepeatArea(source);
+  const minimumWidth = clamp(detected.width * 0.62, 0.18, 0.7);
+  const maximumWidth = clamp(detected.width * 1.42, minimumWidth, 0.86);
+  const minimumHeight = clamp(detected.height * 0.62, 0.18, 0.7);
+  const maximumHeight = clamp(detected.height * 1.42, minimumHeight, 0.86);
+  const rectangles: CropRect[] = [detected];
+
+  for (let index = 1; index < sampleCount; index += 1) {
+    const width = minimumWidth + Math.random() * (maximumWidth - minimumWidth);
+    const height = minimumHeight + Math.random() * (maximumHeight - minimumHeight);
+    rectangles.push({
+      x: Math.random() * Math.max(0, 1 - width),
+      y: Math.random() * Math.max(0, 1 - height),
+      width,
+      height,
+    });
+  }
+
+  const ranked = rectangles
+    .map((sourceRect) => {
+      const imageData = cropImageData(source, sourceRect);
+      const metrics = edgeContinuityMetrics(imageData);
+      return { sourceRect, imageData, metrics, score: scoreCandidate(metrics) };
+    })
+    .sort((first, second) => second.score - first.score);
+
+  const selected: typeof ranked = [];
+  for (const candidate of ranked) {
+    if (selected.every((item) => candidateDistance(item.sourceRect, candidate.sourceRect) > 0.11)) {
+      selected.push(candidate);
+    }
+    if (selected.length === resultCount) break;
+  }
+  if (selected.length < resultCount) {
+    for (const candidate of ranked) {
+      if (selected.includes(candidate)) continue;
+      selected.push(candidate);
+      if (selected.length === resultCount) break;
+    }
+  }
+
+  return selected.map<AITileCandidate>((candidate, index) => ({
+    id: `${Date.now()}-${index}-${Math.random().toString(36).slice(2, 7)}`,
+    sourceRect: candidate.sourceRect,
+    imageData: candidate.imageData,
+    url: imageDataToUrl(candidate.imageData),
+    previewUrl: createTiledPreview(candidate.imageData, 2, 360),
+    score: candidate.score,
+    metrics: candidate.metrics,
+  }));
 }
 
 export function generateTileDraft(

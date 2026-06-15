@@ -36,7 +36,10 @@ Base Color、Normal、Roughness、Height、Metallic 与 Alpha 地图，在实时
 - 保留原始 luminance 与局部纹理进行 recolor
 - 导出配色结果 PNG
 - Manual Tile Mode：选择 repeat area、调整 X/Y offset、检查重复效果
-- AI Tile Mode：基于纹理自相关自动估算横向与纵向 pattern repeat
+- AI Tile Mode：以纹理自相关结果为基准，随机测试 36 个不同位置和尺寸的 repeat crop
+- 按左右/上下边缘、亮度、颜色、纹理与图案连续性进行综合评分
+- 展示去重后的 top 6 AI Tile Candidates，由用户根据 2×2 视觉预览选择
+- Regenerate Candidates 会重新随机搜索一批候选，不固定返回同一个 repeat area
 - 提供 2×2、4×4 与 8×8 seamless repeat preview
 - 50% Offset Preview 将边界接缝移动到中心进行检查
 - Fix Seam 使用四边颜色匹配、center-offset repair、feather blending 和 soft mask 修补
@@ -170,6 +173,8 @@ components/MaterialViewer.tsx
 
 components/TileStudio.tsx
   ├── Manual and AI tile mode controls
+  ├── Six-option AI candidate comparison and selection
+  ├── Candidate regeneration workflow
   ├── Adjustable repeat-area selection
   ├── X/Y offset, blend width, color match, and texture preservation controls
   ├── 50% offset seam inspection
@@ -198,6 +203,8 @@ lib/material-generation.ts
 lib/seamless-tile.ts
   ├── Repeat-area extraction
   ├── Image-based repeat period estimation
+  ├── Random crop sampling and candidate diversification
+  ├── Edge, brightness, color, texture, and pattern scoring
   ├── Circular texture offset
   ├── Border color and periodic edge matching
   ├── Center seam feather and clone-style patching
