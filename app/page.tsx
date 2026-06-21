@@ -23,6 +23,10 @@ import {
   SelectionPoint,
   SegmentationResult,
 } from "@/lib/fabric-segmentation";
+import {
+  analyzeFabricIntelligence,
+  FabricIntelligence,
+} from "@/lib/fabric-intelligence";
 import MaterialViewer from "@/components/MaterialViewer";
 import TileStudio from "@/components/TileStudio";
 import {
@@ -690,6 +694,7 @@ export default function Home() {
   const [resultUrl, setResultUrl] = useState("");
   const [resultImageData, setResultImageData] = useState<ImageData | null>(null);
   const [material, setMaterial] = useState<FabricMaterialAsset | null>(null);
+  const [fabricIntelligence, setFabricIntelligence] = useState<FabricIntelligence | null>(null);
   const [materialSettings, setMaterialSettings] = useState<MaterialGenerationSettings>(
     DEFAULT_MATERIAL_SETTINGS,
   );
@@ -724,6 +729,7 @@ export default function Home() {
     setResultUrl("");
     setResultImageData(null);
     setMaterial(null);
+    setFabricIntelligence(null);
     setSeamlessTexture(null);
     setFileName(file.name);
 
@@ -762,6 +768,7 @@ export default function Home() {
         setResultUrl(selectedUrl);
         setResultImageData(selectedFabric);
         setMaterial(null);
+        setFabricIntelligence(analyzeFabricIntelligence(selectedFabric));
         setSeamlessTexture(null);
         setActiveLayer(0);
       } catch (caught) {
@@ -778,6 +785,7 @@ export default function Home() {
     setResultUrl("");
     setResultImageData(null);
     setMaterial(null);
+    setFabricIntelligence(null);
     setSeamlessTexture(null);
     setTargetColors([]);
   }
@@ -818,6 +826,7 @@ export default function Home() {
         setResultUrl(imageDataToUrl(detected.original));
         setResultImageData(detected.original);
         setMaterial(null);
+        setFabricIntelligence(analyzeFabricIntelligence(detected.original));
         setSeamlessTexture(null);
         setActiveLayer(0);
       } finally {
@@ -857,6 +866,7 @@ export default function Home() {
     window.setTimeout(() => {
       try {
         setMaterial(generateFabricMaterial(seamlessTexture.imageData, materialSettings));
+        setFabricIntelligence(analyzeFabricIntelligence(seamlessTexture.imageData));
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : "Could not generate material maps.");
       } finally {
@@ -871,9 +881,6 @@ export default function Home() {
   ) {
     const nextSettings = { ...materialSettings, [key]: value };
     setMaterialSettings(nextSettings);
-    if (seamlessTexture) {
-      setMaterial(generateFabricMaterial(seamlessTexture.imageData, nextSettings));
-    }
   }
 
   function downloadResult() {
@@ -1125,6 +1132,9 @@ export default function Home() {
               onChange={(nextAsset) => {
                 setSeamlessTexture(nextAsset);
                 setMaterial(null);
+                if (nextAsset) {
+                  setFabricIntelligence(analyzeFabricIntelligence(nextAsset.imageData));
+                }
               }}
             />
           )}
@@ -1142,6 +1152,41 @@ export default function Home() {
                 <span className="material-ready-badge"><i /> Material ready</span>
               </div>
 
+              {fabricIntelligence && (
+                <section className="fabric-understanding-panel">
+                  <div className="fabric-type-callout">
+                    <span>Fabric Type</span>
+                    <strong>
+                      {fabricIntelligence.subCategory}{" "}
+                      <small>(Confidence: {fabricIntelligence.confidence.toFixed(2)})</small>
+                    </strong>
+                  </div>
+                  <div className="fabric-understanding-grid">
+                    <div>
+                      <span>High-level class</span>
+                      <strong>{fabricIntelligence.family}</strong>
+                    </div>
+                    <div>
+                      <span>Structure Type</span>
+                      <strong>{fabricIntelligence.structureType}</strong>
+                    </div>
+                    <div>
+                      <span>Estimated Yarn Behavior</span>
+                      <strong>{fabricIntelligence.yarnBehavior}</strong>
+                    </div>
+                    <div>
+                      <span>Recommended Softness</span>
+                      <strong>
+                        {fabricIntelligence.recommendedSoftness[0]}–{fabricIntelligence.recommendedSoftness[1]}
+                      </strong>
+                    </div>
+                  </div>
+                  <p>
+                    {`Recommended Softness: ${fabricIntelligence.recommendedSoftness[0]}–${fabricIntelligence.recommendedSoftness[1]} for realistic ${fabricIntelligence.family.toLowerCase()} simulation.`}
+                  </p>
+                </section>
+              )}
+
               <div className="material-lab-grid">
                 <div className="material-assets-column">
                   <div className="panel-label">
@@ -1151,7 +1196,85 @@ export default function Home() {
                   <div className="material-generation-controls">
                     <label>
                       <span>
-                        Metallic Intensity
+                        Soft / Firm Fabric
+                        <strong>{materialSettings.softnessLevel}% soft</strong>
+                      </span>
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        value={materialSettings.softnessLevel}
+                        onInput={(event) =>
+                          updateMaterialSetting("softnessLevel", Number(event.currentTarget.value))
+                        }
+                      />
+                    </label>
+                    <label>
+                      <span>
+                        Yarn Thickness
+                        <strong>{materialSettings.yarnThickness}%</strong>
+                      </span>
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        value={materialSettings.yarnThickness}
+                        onInput={(event) =>
+                          updateMaterialSetting("yarnThickness", Number(event.currentTarget.value))
+                        }
+                      />
+                    </label>
+                    <label>
+                      <span>
+                        Flat / Deep Texture
+                        <strong>{materialSettings.loopDepth}% depth</strong>
+                      </span>
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        value={materialSettings.loopDepth}
+                        onInput={(event) =>
+                          updateMaterialSetting("loopDepth", Number(event.currentTarget.value))
+                        }
+                      />
+                    </label>
+                    <label>
+                      <span>
+                        Smooth / Structured
+                        <strong>{materialSettings.surfaceSmoothness}% smooth</strong>
+                      </span>
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        value={materialSettings.surfaceSmoothness}
+                        onInput={(event) =>
+                          updateMaterialSetting("surfaceSmoothness", Number(event.currentTarget.value))
+                        }
+                      />
+                    </label>
+                    <label>
+                      <span>
+                        Micro Variation
+                        <strong>{materialSettings.microVariationStrength}%</strong>
+                      </span>
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        value={materialSettings.microVariationStrength}
+                        onInput={(event) =>
+                          updateMaterialSetting(
+                            "microVariationStrength",
+                            Number(event.currentTarget.value),
+                          )
+                        }
+                      />
+                    </label>
+                    <label>
+                      <span>
+                        Reflective Yarn / Shine
                         <strong>{materialSettings.metallicIntensity}%</strong>
                       </span>
                       <input
@@ -1159,32 +1282,14 @@ export default function Home() {
                         min="0"
                         max="100"
                         value={materialSettings.metallicIntensity}
-                        onChange={(event) =>
-                          updateMaterialSetting(
-                            "metallicIntensity",
-                            Number(event.target.value),
-                          )
+                        onInput={(event) =>
+                          updateMaterialSetting("metallicIntensity", Number(event.currentTarget.value))
                         }
                       />
                     </label>
                     <label>
                       <span>
-                        Alpha Threshold
-                        <strong>{materialSettings.alphaThreshold}%</strong>
-                      </span>
-                      <input
-                        type="range"
-                        min="0"
-                        max="100"
-                        value={materialSettings.alphaThreshold}
-                        onChange={(event) =>
-                          updateMaterialSetting("alphaThreshold", Number(event.target.value))
-                        }
-                      />
-                    </label>
-                    <label>
-                      <span>
-                        Alpha Strength
+                        Open Structure Transparency
                         <strong>{materialSettings.alphaStrength}%</strong>
                       </span>
                       <input
@@ -1192,14 +1297,14 @@ export default function Home() {
                         min="0"
                         max="100"
                         value={materialSettings.alphaStrength}
-                        onChange={(event) =>
-                          updateMaterialSetting("alphaStrength", Number(event.target.value))
+                        onInput={(event) =>
+                          updateMaterialSetting("alphaStrength", Number(event.currentTarget.value))
                         }
                       />
                     </label>
                     <p>
-                      Metallic defaults to 0 for standard textiles. Increase Alpha Strength only
-                      for lace, mesh, crochet, sheer, or open-knit structures.
+                      These controls tune the live 3D material in fabric language. Use Regenerate
+                      Material when you want downloadable maps to reflect the latest settings.
                     </p>
                   </div>
                   <div className="material-map-grid">
@@ -1240,7 +1345,7 @@ export default function Home() {
                     <span>Real-Time 3D Material Preview</span>
                     <span className="result-status"><i /> PBR active</span>
                   </div>
-                  <MaterialViewer material={material} />
+                  <MaterialViewer material={material} settings={materialSettings} />
                 </div>
               </div>
             </section>

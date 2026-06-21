@@ -10,12 +10,22 @@ export type MaterialGenerationSettings = {
   metallicIntensity: number;
   alphaThreshold: number;
   alphaStrength: number;
+  softnessLevel: number;
+  yarnThickness: number;
+  loopDepth: number;
+  surfaceSmoothness: number;
+  microVariationStrength: number;
 };
 
 export const DEFAULT_MATERIAL_SETTINGS: MaterialGenerationSettings = {
   metallicIntensity: 0,
   alphaThreshold: 18,
   alphaStrength: 0,
+  softnessLevel: 68,
+  yarnThickness: 54,
+  loopDepth: 46,
+  surfaceSmoothness: 62,
+  microVariationStrength: 28,
 };
 
 export type MaterialMapAsset = {
@@ -71,6 +81,15 @@ const MAP_META: Record<
 
 function clampByte(value: number) {
   return Math.max(0, Math.min(255, Math.round(value)));
+}
+
+function clampUnit(value: number) {
+  return Math.max(0, Math.min(1, value));
+}
+
+function hashNoise(x: number, y: number) {
+  const value = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453;
+  return value - Math.floor(value);
 }
 
 function imageDataToUrl(imageData: ImageData) {
@@ -161,15 +180,37 @@ export function generateFabricMaterial(
   settings: MaterialGenerationSettings = DEFAULT_MATERIAL_SETTINGS,
 ): FabricMaterialAsset {
   const { width, height } = baseColor;
+  const softness = clampUnit(settings.softnessLevel / 100);
+  const yarnThickness = clampUnit(settings.yarnThickness / 100);
+  const loopDepth = clampUnit(settings.loopDepth / 100);
+  const smoothness = clampUnit(settings.surfaceSmoothness / 100);
+  const microVariation = clampUnit(settings.microVariationStrength / 100);
   const luminance = luminanceField(baseColor);
-  const localAverage = blurField(luminance, width, height, 4);
-  const broadAverage = blurField(luminance, width, height, 14);
+  const localRadius = Math.max(2, Math.round(3 + yarnThickness * 3 + smoothness * 5 + softness * 4));
+  const broadRadius = Math.max(localRadius + 4, Math.round(12 + yarnThickness * 10 + smoothness * 8));
+  const localAverage = blurField(luminance, width, height, localRadius);
+  const broadAverage = blurField(luminance, width, height, broadRadius);
+  const softAverage = blurField(luminance, width, height, Math.max(localRadius + 3, Math.round(9 + softness * 13)));
   const heightField = new Float32Array(luminance.length);
+  const sharpDefinition = 1 - softness * 0.64;
+  const ridgeAmplitude = 0.52 + (1 - softness) * 1.18 + loopDepth * 0.58;
+  const broadAmplitude = 0.25 + loopDepth * 0.72 + yarnThickness * 0.26;
+  const microAmplitude = microVariation * (0.22 + softness * 0.18);
 
   for (let pixel = 0; pixel < heightField.length; pixel += 1) {
+    const x = pixel % width;
+    const y = Math.floor(pixel / width);
     const fineTexture = luminance[pixel] - localAverage[pixel];
     const broadTexture = localAverage[pixel] - broadAverage[pixel];
-    heightField[pixel] = clampByte(128 + fineTexture * 2.2 + broadTexture * 0.7);
+    const softenedTexture = softAverage[pixel] - broadAverage[pixel];
+    const microNoise = (hashNoise(x, y) - 0.5) * 18 * microAmplitude;
+    heightField[pixel] = clampByte(
+      128 +
+        fineTexture * ridgeAmplitude * sharpDefinition +
+        broadTexture * broadAmplitude +
+        softenedTexture * softness * 0.72 +
+        microNoise,
+    );
   }
 
   const heightMap = createMap(baseColor, (pixel, _x, _y, output) => {
@@ -187,7 +228,7 @@ export function generateFabricMaterial(
     const down = heightField[Math.min(height - 1, y + 1) * width + x];
     const dx = (right - left) / 255;
     const dy = (down - up) / 255;
-    const strength = 3.2;
+    const strength = 1.15 + (1 - softness) * 2.25 + loopDepth * 0.52;
     const nx = -dx * strength;
     const ny = dy * strength;
     const nz = 1;

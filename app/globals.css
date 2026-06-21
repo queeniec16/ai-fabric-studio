@@ -2003,11 +2003,81 @@ button {
   gap: 30px;
 }
 
+.fabric-understanding-panel {
+  margin-bottom: 22px;
+  padding: 16px;
+  border: 1px solid #c5d2c8;
+  background: #f0f5ef;
+}
+
+.fabric-type-callout {
+  margin-bottom: 13px;
+  padding-bottom: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  border-bottom: 1px solid #c5d2c8;
+}
+
+.fabric-type-callout span,
+.fabric-understanding-grid span {
+  display: block;
+  color: var(--muted);
+  font-size: 7px;
+  font-weight: 800;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+
+.fabric-type-callout strong {
+  color: var(--green);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 24px;
+  font-weight: 400;
+  text-align: right;
+}
+
+.fabric-type-callout small {
+  color: var(--muted);
+  font-family: Inter, Arial, sans-serif;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.fabric-understanding-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.fabric-understanding-grid > div {
+  min-height: 74px;
+  padding: 11px;
+  border: 1px solid #d4ddd6;
+  background: rgba(255, 255, 255, 0.68);
+}
+
+.fabric-understanding-grid strong {
+  margin-top: 7px;
+  display: block;
+  color: var(--ink);
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.fabric-understanding-panel p {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.5;
+}
+
 .material-generation-controls {
   margin-bottom: 10px;
   padding: 12px;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
   border: 1px solid var(--line);
   background: #fff;
@@ -2360,6 +2430,10 @@ footer {
     grid-template-columns: 1fr;
   }
 
+  .fabric-understanding-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .ai-candidate-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
@@ -2494,6 +2568,19 @@ footer {
 
   .material-generation-controls p {
     grid-column: auto;
+  }
+
+  .fabric-type-callout {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .fabric-type-callout strong {
+    text-align: left;
+  }
+
+  .fabric-understanding-grid {
+    grid-template-columns: 1fr;
   }
 
   .result-column {

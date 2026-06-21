@@ -4,14 +4,20 @@ import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
-import type { FabricMaterialAsset } from "@/lib/material-generation";
+import type { FabricMaterialAsset, MaterialGenerationSettings } from "@/lib/material-generation";
 
 type PreviewGeometry = "sphere" | "plane";
 type PreviewView = "closeup" | "full";
 type TextureRepeat = 1 | 2 | 4 | 8 | 16;
 type MaterialScale = 10 | 25 | 50 | 100;
 
-export default function MaterialViewer({ material }: { material: FabricMaterialAsset }) {
+export default function MaterialViewer({
+  material,
+  settings,
+}: {
+  material: FabricMaterialAsset;
+  settings: MaterialGenerationSettings;
+}) {
   const hostRef = useRef<HTMLDivElement>(null);
   const [geometry, setGeometry] = useState<PreviewGeometry>("sphere");
   const [view, setView] = useState<PreviewView>("full");
@@ -67,6 +73,13 @@ export default function MaterialViewer({ material }: { material: FabricMaterialA
     });
 
     const materialAspect = material.width / material.height;
+    const softness = Math.max(0, Math.min(1, settings.softnessLevel / 100));
+    const firmness = 1 - softness;
+    const yarnThickness = Math.max(0, Math.min(1, settings.yarnThickness / 100));
+    const loopDepth = Math.max(0, Math.min(1, settings.loopDepth / 100));
+    const smoothness = Math.max(0, Math.min(1, settings.surfaceSmoothness / 100));
+    const structure = 1 - smoothness;
+    const microVariation = Math.max(0, Math.min(1, settings.microVariationStrength / 100));
     const planeWidth = materialAspect >= 1 ? 3.35 : 3.35 * materialAspect;
     const planeHeight = materialAspect >= 1 ? 3.35 / materialAspect : 3.35;
     const geometryObject =
@@ -77,17 +90,24 @@ export default function MaterialViewer({ material }: { material: FabricMaterialA
     const fabricMaterial = new THREE.MeshPhysicalMaterial({
       map: colorMap,
       normalMap,
-      normalScale: new THREE.Vector2(0.72, 0.72),
+      normalScale: new THREE.Vector2(
+        0.32 + firmness * 0.55 + structure * 0.22 + loopDepth * 0.12,
+        0.32 + firmness * 0.55 + structure * 0.22 + loopDepth * 0.12,
+      ),
       roughnessMap,
-      roughness: 0.88,
+      roughness: Math.max(0.46, Math.min(0.96, 0.74 + softness * 0.16 + smoothness * 0.07 - microVariation * 0.05)),
       metalnessMap,
       metalness: 1,
       displacementMap,
-      displacementScale: geometry === "sphere" ? 0.035 : 0.095,
-      displacementBias: geometry === "sphere" ? -0.017 : -0.045,
-      sheen: 0.28,
+      displacementScale:
+        (geometry === "sphere" ? 0.022 : 0.062) *
+        (0.42 + firmness * 0.78 + loopDepth * 0.55 + yarnThickness * 0.22),
+      displacementBias:
+        (geometry === "sphere" ? -0.011 : -0.031) *
+        (0.42 + firmness * 0.78 + loopDepth * 0.55 + yarnThickness * 0.22),
+      sheen: 0.2 + softness * 0.22,
       sheenColor: new THREE.Color("#f3eee5"),
-      sheenRoughness: 0.72,
+      sheenRoughness: Math.max(0.48, Math.min(0.92, 0.62 + softness * 0.18 + smoothness * 0.12)),
       side: THREE.DoubleSide,
       alphaMap,
       transparent: true,
@@ -160,6 +180,7 @@ export default function MaterialViewer({ material }: { material: FabricMaterialA
     lightIntensity,
     material,
     materialScale,
+    settings,
     textureRepeat,
     view,
   ]);
